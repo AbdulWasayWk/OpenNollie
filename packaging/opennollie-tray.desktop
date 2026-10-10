@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OpenNollie tray
+Comment=Quick profile switching for the Nollie 16CH RGB controller
+Exec=opennollie-tray
+Icon=preferences-desktop-color
+Terminal=false
+Categories=Settings;HardwareSettings;
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
