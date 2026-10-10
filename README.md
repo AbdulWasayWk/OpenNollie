@@ -55,7 +55,7 @@ Use one of the two, not both.
 | **Built-in effects** | The controller's own effects. *Normal lighting*: groups of ports, each with an effect, showing only the settings that effect uses. *Startup animation*: plays once when the PC turns on. Changes apply as you make them, with each port's color balance |
 | **Ports & LEDs** | Port names, LED counts, *Identify*, *LED test* (find the count), *LED order* (reverse, start LED, presets), *Color balance* (match a device's colors to the others, e.g. a GPU) |
 | **Layout** | The case picture used for previews: add fans and strips, drag them into place, set their port (and which LEDs, for daisy chains), size, angle and name; light one up on the device to find it |
-| **Palettes** | The controller's 8 palette groups (used by palette effects) |
+| **Palettes** | The controller's 8 palettes of 16 colors. Only the built-in effect *ColorFromPalette* uses them: give a group that effect on *Built-in effects* and pick a palette. The page shows which groups use each palette |
 | **Stored animation** | What's in the controller's flash; play/stop; upload an FSEQ file |
 | **Device** | Name, firmware, power readings, startup behaviour, idle fallback, backup/restore, restart, factory reset |
 | **Settings** | Whether the tray icon and the background service start when you log in |

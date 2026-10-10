@@ -97,14 +97,14 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 | App page | Features | Status |
 |---|---|---|
 | Home / Basic settings | controller name; fw version; boot playlist; direct-drive idle timeout; (GPIO: not on 16CH) | [x] GUI Device page + CLI |
-| Loop canvas / Boot canvas | canvases, ports per canvas, per-canvas effect + params (incl. palette group, blend, frame delay), loop/start FPS | [x] Built-in effects page reworked (2026-10-11): "groups", tabs Normal lighting / Startup animation, only the settings each effect uses (`protocol.EFFECT_PARAMS`), applies as you edit (diff-only writes), color balance per port (`builtin.py`). Tested vs the simulated controller; [ ] boot canvases not yet hw-tested; [ ] user to check a split group (fans + GPU, Breath) stays in step |
+| Loop canvas / Boot canvas | canvases, ports per canvas, per-canvas effect + params (incl. palette group, blend, frame delay), loop/start FPS | [x] Built-in effects page reworked (2026-10-11): "groups", tabs Normal lighting / Startup animation, only the settings each effect uses (`protocol.EFFECT_PARAMS`), applies as you edit (diff-only writes), color balance per port (`builtin.py`). Verified by the user (2026-10-11): split group (fans + GPU, Breath) stays in step; startup animation plays once after a power cycle |
 | LED settings | LED count per port, names | [x] |
 | LED settings | LED order remap (vmap), component/vmap presets | [x] `layouts.py`, Ports page "LED order", CLI `order`; our engine applies the order to live/stored effects itself (fw only applies it to built-in effects with vmap_process) |
 | LED settings | auto-detect LED count | N/A on 16CH (fw lacks it); our `ledtest` replaces it |
-| Palette editor | 8 groups × 16 colors; import/export JSON | [x] (palette write verified; GUI palette write not hw-checked) |
+| Palette editor | 8 palettes × 16 colors; import/export JSON | [x] (palette write verified; page explains ColorFromPalette + shows which groups use each palette; GUI write not yet checked by eye) |
 | FSEQ player | upload FSEQ (erase/write/verify), channel map, play/stop/loop | [x] verified on hw |
 | Device info | power (V/I/temp/load), flash chip, write count, stored FSEQ size | [x] |
-| Backup | export/restore config JSON, factory reset, restart | [x] export, restore, restart verified; factory reset not run from our app |
+| Backup | export/restore config JSON, factory reset, restart | [x] all verified on hw (factory reset + restore from the GUI by the user, 2026-10-11) |
 | Power test | | N/A on 16CH |
 | Identify | light one port | [x] |
 | **OpenNollie extras** | live per-port colors; software effects engine (10 effects + custom keyframes), live or stored as FSEQ; profiles + dropdown; daemon; tray; studio with editable case picture; per-port color balance; start-at-login switches | [x] verified on hw and by the user |
@@ -152,9 +152,12 @@ The app is **done** when every item below is checked. Keep this list current; it
 **Verification**
 - [x] User has tested the GUI on the real desktop (KDE/Breeze): basic functionality works, saved settings survived
       a PC reboot (2026-10-11). Re-test the pages that change in the remaining work.
-- [ ] Boot canvases (14+) tested on hardware: apply → power cycle → plays once at power-on
-- [ ] Factory reset run from our app (GUI) and the result verified
-- [ ] Palettes page: write from the GUI verified on hardware (reads/writes already round-trip in `hw_roundtrip`)
+- [x] Boot canvases (14+) tested on hardware: apply → power cycle → plays once at power-on (user, 2026-10-11)
+- [x] Factory reset run from our app (GUI) and restored from a backup (user, 2026-10-11). Port names weren't in that
+      backup (none were stored when it was taken); name restore verified on hw separately
+- [x] Built-in group split for color balance (fans + GPU, Breath) stays in step (user, 2026-10-11)
+- [ ] Palettes page: write from the GUI verified on hardware by eye (a group with ColorFromPalette; the user didn't
+      find where palettes apply, so the page now explains it). Reads/writes round-trip in `hw_roundtrip`
 
 **Installation**
 - [x] `tools/install-user.sh` run 2026-10-11 (user's OK): `opennollie` / `opennollie-gui` in ~/.local/bin, app-menu
@@ -165,7 +168,7 @@ The app is **done** when every item below is checked. Keep this list current; it
 - [x] Restore settings from a backup JSON (GUI + CLI): diff-based `model.restore`, `--dry-run`; verified on hw
 - [x] LED order editor (vmap / LED index: as wired / by position, reverse, start LED, dark LEDs), GUI dialog with
       on-device preview + CLI `order`; LED-index write verified on hw (port 1 reverse/reset round trip).
-      [ ] User to check the preview/visual direction on a fan
+      User checked the preview/visual direction on a fan (2026-10-11)
 - [x] Layout presets: SignalRGB component JSON (`Components/*.json`) and Nollie vmap JSON (`vmap/*.json`), user-supplied
       (not bundled); 237/238 vendor files load (1 vendor file is internally inconsistent and rejected, as in the app)
 
@@ -173,9 +176,9 @@ The app is **done** when every item below is checked. Keep this list current; it
 - [x] Tray icon (`opennollie-tray`, `gui/tray.py`): run live / save to device per profile, stop, open app; autostart at
       login via the installer. Live start/stop through the daemon verified; it's running on the user's desktop
 - [x] README: install, GUI pages, tray, CLI, profile format, save-to-device, limits, troubleshooting, development
-- [~] Arch PKGBUILD (`packaging/PKGBUILD` + `opennollie.install`; pyproject wheel verified via setuptools).
-      [ ] Test `makepkg` (needs `python-build python-installer`, user installs with sudo); don't install it on top
-      of the user install
+- [x] Arch PKGBUILD (`packaging/PKGBUILD` + `opennollie.install`): `makepkg` builds (2026-10-11, from the local repo),
+      check() runs the 65 tests, the package has all modules/examples/unit/udev/desktop files, and the packaged CLI
+      runs. Not installed (the user install from tools/install-user.sh stays)
 
 **Known limits (not to-dos):** GPU smooths per-LED patterns (its own controller reads 6 values); a stored setup is
 either built-in canvases or one animation; no LED auto-detect or power test on 16CH firmware.
@@ -204,7 +207,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Writes verified on hardware: canvas params (readback + visual), loop canvas layout via `static`, mode
 - [x] Setters round-trip verified (`python3 -m tests.hw_roundtrip`, 12/12): LED/zLED counts, palette, loop/boot
       frame ms, boot playlist, idle, vmap name, dynamic 1/2, frame delay, name. Reboot verified.
-- [x] LED index write verified (restore + `order` round trips). [ ] Not yet on hw: boot canvases (14+), factory reset
+- [x] LED index write verified (restore + `order` round trips). Boot canvases and factory reset verified (user)
 - [x] Live streaming (OL) + identify with keep-alive (engine loop, KeepAlive, LiveSession)
 - [x] Voltage/power + flash info (`power`). LED-count detection and power test: **N/A on the 16CH** (fw lacks them)
 - [x] Flash ops + FSEQ writer/upload/play + boot-loop persistence, verified on hardware (GRB storage!)
@@ -246,13 +249,16 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ### Phase 6: Packaging
 - [x] pyproject.toml (commands: opennollie, opennollie-daemon, opennollie-gui, opennollie-tray), examples as package data
-- [~] PKGBUILD written; build test pending. README done. User install via tools/install-user.sh (incl. tray autostart)
+- [x] PKGBUILD builds and passes check(). README done. User install via tools/install-user.sh (incl. tray autostart)
 
 ## Open questions
 - What's on interface 1 (keyboard, 8 B IN)? Probably irrelevant.
 - What exactly is mode SL (2)? It's seen for ~2–3 s after an FSEQ upload/stop; PLAY is ignored then.
 
 ## Findings log
+- 2026-10-11: **After a factory reset the controller names unnamed ports "None"** (the official app treats "None" /
+  "null" as no name; we do too, in `device.vmap_name`). Writing an empty name clears it. Port names only reach the
+  controller on Ports & LEDs → Apply; the page now shows unapplied edits. (source: hw + app `_norm_vmap_name`)
 - 2026-10-11: **Bug: the unit tests overwrote the user's real color balance** with their test value (port 9 red 50 %).
   `calibration.load/save(path=PATH)` bound the path as a default argument, so the tests' `mock.patch(PATH)` never
   applied; `caselayout` had the same pattern (its tests pass explicit paths, so layout.json was safe). Fixed: paths are
