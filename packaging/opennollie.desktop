@@ -6,5 +6,5 @@ Comment=Control the Nollie 16CH RGB controller
 Exec=opennollie-gui
 Icon=preferences-desktop-color
 Terminal=false
-Categories=Settings;HardwareSettings;Utility;
+Categories=Settings;HardwareSettings;
 Keywords=RGB;ARGB;LED;Nollie;lighting;fans;

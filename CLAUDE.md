@@ -146,8 +146,8 @@ The app is **done** when every item below is checked. Keep this list current; it
 - [ ] Palettes page: write from the GUI verified on hardware (reads/writes already round-trip in `hw_roundtrip`)
 
 **Installation**
-- [ ] `tools/install-user.sh` run (with the user's OK): `opennollie` / `opennollie-gui` on PATH, app-menu entry,
-      daemon as a systemd user service started at login; verified after a re-login/reboot
+- [~] `tools/install-user.sh` run 2026-10-11 (user's OK): `opennollie` / `opennollie-gui` in ~/.local/bin, app-menu
+      entry, `opennollie.service` enabled + running (CLI verified through it). [ ] Still to verify: after a re-login/reboot
 
 **Missing features (parity with NollieRGB 2.3.0)**
 - [ ] Restore settings from a backup JSON (GUI + CLI)
