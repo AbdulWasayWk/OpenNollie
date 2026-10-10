@@ -31,6 +31,8 @@ An open-source Linux app for the **Nollie 16CH RGB** controller (now on firmware
 - The host sees passthrough USB traffic: `tools/setup-dev.sh usbmon` (once per boot, sudo), then
   `tools/capture.sh <name> [secs]` → `captures/<name>.pcapng`.
 - After the VM releases the Nollie, `usbhid` normally re-binds by itself. If not: `tools/setup-dev.sh bind`.
+- Git: public repo **github.com/AbdulWasayWk/OpenNollie** (`origin`, SSH; branch `master`), GPL-3.0-or-later.
+  Push only when the user asks.
 
 ## Port map (this machine)
 
@@ -155,7 +157,7 @@ The app is **done** when every item below is checked. Keep this list current; it
 
 **Polish**
 - [ ] Tray icon with quick profile switching (live / save to device)
-- [ ] README: install, CLI and GUI usage, profile format, limitations
+- [ ] README: install, CLI and GUI usage, profile format, limitations (a short stub exists)
 - [ ] Arch PKGBUILD (installs the package, udev rule, systemd user unit, desktop entry)
 
 **Known limits (not to-dos):** GPU smooths per-LED patterns (its own controller reads 6 values); a stored setup is
