@@ -166,8 +166,11 @@ class Nollie16:
         return p.parse_u16le(self.query(p.get_core(CoreItem.OL_IDLE)), 1)[0]
 
     def vmap_name(self, ch: int) -> str:
+        """A port's name ("" if none). A factory reset sets unnamed ports to "None"; like the official app,
+        "None" and "null" count as no name."""
         r = self.query(p.get_core(CoreItem.VMAP_NAME, ch))
-        return p.parse_utf16le(r[1 : 1 + r[0]])
+        name = p.parse_utf16le(r[1 : 1 + r[0]]).strip()
+        return "" if name in ("None", "null") else name
 
     def led_index(self) -> list[list[int]]:
         """LED order remap ("vmap") per channel: 16 × 256 entries."""

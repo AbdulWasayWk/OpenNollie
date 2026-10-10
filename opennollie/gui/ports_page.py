@@ -309,7 +309,7 @@ class ColorBalanceDialog(QDialog):
 class PortsPage(QWidget):
     title = "Ports && LEDs"
     icon = "preferences-desktop-display"
-    labels_changed = Signal(dict)
+    labels_changed = Signal(object)          # {port: name}
 
     def __init__(self, device: Device):
         super().__init__()
@@ -354,14 +354,22 @@ class PortsPage(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         lay.addWidget(self.table)
         row = QHBoxLayout()
-        for text, slot in (("Reload", self.refresh), ("Apply to controller", self._apply)):
-            b = QPushButton(text)
+        self.apply_btn = QPushButton("Apply to controller")
+        for b, slot in ((QPushButton("Reload"), self.refresh), (self.apply_btn, self._apply)):
             b.clicked.connect(slot)
             row.addWidget(b)
+        self.pending = QLabel("<span style='color:#d08000'>Names / LED counts changed: not on the controller until "
+                              "you press <b>Apply to controller</b>.</span>")
+        row.addWidget(self.pending)
         row.addStretch(1)
         lay.addLayout(row)
+        for port in self.names:
+            self.names[port].textEdited.connect(lambda _: self._update_pending())
+            self.counts[port].valueChanged.connect(lambda _: self._update_pending())
         self._loaded = False
+        self._stored: tuple | None = None          # names and LED counts as on the controller
         self._orders: dict[int, list[int]] = {}
+        self._update_pending()
 
     def showEvent(self, e):
         if not self._loaded:
@@ -382,9 +390,19 @@ class PortsPage(QWidget):
                 dark = f" + {self._zleds[ch]} dark" if self._zleds[ch] else ""
                 self.order_buttons[port].setText((layouts.describe(order, counts[ch]) if order else "as wired") + dark)
             self._loaded = True
+            self._stored = self._values()
+            self._update_pending()
             self._show_balance()
             self.labels_changed.emit(self.labels())
         self.device.run(load, show)
+
+    def _values(self) -> tuple:
+        return {pt: w.text().strip() for pt, w in self.names.items()}, self.led_counts()
+
+    def _update_pending(self) -> None:
+        changed = self._stored is not None and self._values() != self._stored
+        self.apply_btn.setEnabled(changed)
+        self.pending.setVisible(changed)
 
     def labels(self) -> dict[int, str]:
         return {pt: w.text().strip() for pt, w in self.names.items() if w.text().strip()}
@@ -397,6 +415,7 @@ class PortsPage(QWidget):
         return dict(self._orders)
 
     def _apply(self) -> None:
+        values = self._values()
         counts = [0] * p.NUM_CHANNELS
         names = {}
         for port in self.names:
@@ -415,6 +434,8 @@ class PortsPage(QWidget):
             # a saved animation is drawn for the LED counts it was saved with: redo it for the new ones
             return engine.update_saved(d) if changed else None
         def done(updated):
+            self._stored = values
+            self._update_pending()
             msg = "Ports saved to the controller"
             if updated and updated != engine.UP_TO_DATE:
                 msg += f"; the lighting on the controller was updated for the new LED counts ({updated})"
