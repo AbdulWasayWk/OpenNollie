@@ -95,12 +95,12 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 |---|---|---|
 | Home / Basic settings | controller name; fw version; boot playlist (Start effect: start canvas; Loop effect: HW effects / FSEQ loop / FSEQ once); direct-drive idle timeout; (GPIO: not on 16CH) | [ ] |
 | Loop canvas / Boot canvas | add/delete/edit canvases, drag channels into canvases, per-canvas effect + params (brightness, speed, size, delay, frame delay, vmap process, palette, blend, colors 1–3), loop FPS, start FPS | [ ] |
-| LED settings | per-channel LED count, component presets (`Components/*.json`, `vmap/*.json`), LED order (first/reverse) = vmap, vmap name, **auto-detect LED count** | [ ] |
+| LED settings | per-channel LED count, component presets (`Components/*.json`, `vmap/*.json`), LED order (first/reverse) = vmap, vmap name (auto-detect: N/A on 16CH) | [ ] |
 | Palette editor | 8 groups × 16 colors; import/export JSON | [ ] |
 | FSEQ player | upload FSEQ to flash (erase/write/verify), channel map, play/stop/loop | [ ] |
 | Device info | canvas overview, power (rails V/I), MCU temp/load, flash chip ID, ROM state, write count, stored FSEQ size | [ ] |
 | Backup | export/import config JSON, factory reset, restart | [ ] |
-| Power test | per-channel current measurement, CSV export | [ ] |
+| Power test | N/A on 16CH (Nollie8 Plus only) | — |
 | Identify | light one channel red (`make_ch`) | [ ] |
 | **OpenNollie extras** | live per-channel colors; **software effects engine** (any user-defined effect) streamed live, or **rendered to FSEQ and stored on the device** | [ ] |
 
@@ -148,15 +148,16 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Read-only queries from Linux match the app (mode, version, canvases, LED counts)
 
 ### Phase 3: Protocol library (fw 2.3.0)
-- [ ] `docs/PROTOCOL.md`: rewrite for fw 2.3.0 (all commands, payloads, responses, sequences from capture)
+- [x] `docs/PROTOCOL.md`: rewritten for fw 2.3.0
 - [x] `protocol.py` + `device.py`: request/response, GET/SET except OTA; unit tests vs captured bytes
 - [x] `model.py`: read full device config (`opennollie info` / `dump` / `power`), verified on hardware
 - [x] Writes verified on hardware: canvas params (readback + visual), loop canvas layout via `static`, mode
-- [~] Setters implemented, not yet hardware-verified: LED counts, palettes, FPS, boot playlist, idle, name,
-      vmap/LED index, vmap name, dynamic, frame delay, boot canvases, factory reset, reboot
+- [x] Setters round-trip verified (`python3 -m tests.hw_roundtrip`, 12/12): LED/zLED counts, palette, loop/boot
+      frame ms, boot playlist, idle, vmap name, dynamic 1/2, frame delay, name. Reboot verified.
+- [ ] Not yet exercised: boot canvases (14+), LED index write, factory reset (user did one via the app)
 - [~] Live streaming (OL) + identify: single frames verified; needs a keep-alive loop (3 s fallback)
-- [ ] LED-count auto-detection, voltage/power, device info
-- [ ] Flash ops + FSEQ upload/play (read the app's flash code fully first; verify with CRC)
+- [x] Voltage/power + flash info (`power`). LED-count detection and power test: **N/A on the 16CH** (fw lacks them)
+- [x] Flash ops + FSEQ writer/upload/play + boot-loop persistence, verified on hardware (GRB storage!)
 - [ ] Backup/restore JSON (compatible with the app's export format if practical), factory reset, reboot
 
 ### Phase 4: Effects engine + headless product
@@ -172,12 +173,17 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Open questions
 - What's on interface 1 (keyboard, 8 B IN)? Probably irrelevant.
-- Real LED counts per fan/GPU: use the firmware's auto-detect (`FA 14`) once implemented.
-- Do the canvas colors in `CH_PARAM` go out as GRB or RGB? Check the app's UI code before writing colors.
-- How does mode SL (2) differ from HW?
+- Real LED counts per fan/GPU are unknown, and the 16CH can't auto-detect them. Ask the user for fan/GPU models,
+  or count visually with a per-LED test pattern.
+- What exactly is mode SL (2)? It's seen for ~2–3 s after an FSEQ upload/stop; PLAY is ignored then.
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: **Stored animations work end to end**: FSEQ upload 190 KB in 1.6 s with matching device CRC, PLAY loops
+  (mode FSEQ), boot playlist steady=FSEQ loop survives a controller reboot and plays at power-on. **FSEQ frame bytes
+  are sent to the LEDs unconverted, so store GRB** (bytes 00 66 00 showed red). PLAY is ignored for ~2–3 s after an
+  upload/stop (mode SL). Flash chip: GigaDevice 16 MB. LED detect is unsupported on 16CH. Settings reach flash
+  ~5 s after a SET. (source: hardware + user observation)
 - 2026-10-11: **Stored per-port colors work** (`static`): 5 Solid canvases, readback exact, user confirmed every
   group's color, so the port map is right on fw 2.3.0. Canvas-params write: readback exact; WRITE_COUNT 25→26 a few
   seconds later (lazy flash flush). Live: one frame → mode ONLINE, back to HARDWARE after 3.0 s (idle=0 default).
