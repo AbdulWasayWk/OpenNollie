@@ -18,8 +18,8 @@ An open-source Linux app for the **Nollie 16CH RGB** controller (USB `3061:4716`
 ## Environment facts
 
 - Host: CachyOS, kernel 7.x, shell `fish`. Python 3 is available. No Rust toolchain.
-- Nollie: `3061:4716 nollie.cn Nollie 16CH RGB`, serial `00B7FE6232DC30F6`, bcdDevice `0.10`,
-  USB bus 1, port `1-8`.
+- Nollie: **`16d5:2a16`** (current fw since 2026-10-10; was `3061:4716` legacy) "nollie.cn Nollie 16CH RGB",
+  serial `00B7FE6232DC30F6`, bcdDevice `0.10`, USB bus 1, port `1-8`.
 - One HID interface (`1-8:1.0`): EP `0x81` IN (64 B), EP `0x01` OUT (**1024 B**).
 - OpenRGB 1.0+ (git66) is installed and has a Nollie driver. Use it as the reference for the
   live protocol.
@@ -120,7 +120,7 @@ One action per capture, about 3 s between steps:
 - [ ] Observation: does the saved lighting come back after a reboot with the VM off?
 - [x] Got the vendor app (NollieRGB v2.3.0 portable, in `vendor-app/`, gitignored). It's PyInstaller/Python 3.11, so
       it decompiles to readable bytecode; see `docs/PROTOCOL.md` § Vendor app analysis. Tools: `tools/re/`
-- [ ] **DECISION PENDING (user):** stay on legacy firmware vs. let the official app update the firmware (see below)
+- [x] Firmware updated to current fw via the official app (2026-10-10). The device is now `16d5:2a16`
 
 ### Phase 3: Protocol
 - [ ] Decode captures → `docs/PROTOCOL.md`
@@ -140,7 +140,8 @@ One action per capture, about 3 s between steps:
 - [ ] PKGBUILD, udev rule, systemd unit, README
 
 ## Open questions
-- **Firmware: our Nollie runs LEGACY firmware (`Nollie16_old`, 3061:4716).** App v2.3.0 forces an OTA update for
+- ~~Legacy firmware~~ Resolved 2026-10-10: updated to current fw (16d5:2a16). Background kept below for reference.
+- **Firmware (was): our Nollie ran LEGACY firmware (`Nollie16_old`, 3061:4716).** App v2.3.0 forces an OTA update for
   legacy devices and only supports save-to-device / effects / FSEQ on the current firmware (16D5:2A16). The VM has
   NollieRGB **1.0** (old app). Recommended: update via the official v2.3.0 app in the VM, never from our tool.
   OTA flow: app → `0xFD` jump-BL → device re-enumerates as **3061:f037** (bootloader) → PROM + VERIFY (CRC) → reboot
@@ -155,6 +156,12 @@ One action per capture, about 3 s between steps:
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-10 23:29: **Firmware updated** with the official NollieRGB v2.3.0 in the VM. 3061:4716 → bootloader 3061:f037
+  (attached 23:29:03) → **16d5:2a16** (23:29:27), same serial `00B7FE6232DC30F6`. New fw exposes 2 HID interfaces:
+  if0 = 1024 B IN/OUT (RGB protocol), if1 = 8 B IN only (unknown). The user reports the app shows success.
+  The capture (16 min, 36k pkts) also has the user's exploration of v2.3.0 on the new fw (USB addr 7, ~23:29–23:44).
+  Gotcha: every device reset re-enumerates with a new USB address, which leaves the VM's hostdev stale.
+  `vm-follow-nollie.sh` now replaces stale entries. (source: captures/fw_update_2.3.0.pcapng, lsusb)
 - 2026-10-10: Vendor app v2.3.0 = PyInstaller (Py 3.11). Full current-firmware protocol recovered from bytecode
   (commands 0xF2–0xFF: effects, palettes, boot playlist, idle fallback, flash, FSEQ animations). Our device is
   `Nollie16_old`; the app sends legacy devices straight to OTA update. `config/Nollie16.bin` = RISC-V firmware image.
