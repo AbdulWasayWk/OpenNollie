@@ -65,16 +65,30 @@ class Profile:
     port_leds: dict[int, int] = field(default_factory=dict)
     groups: dict[str, list[int]] = field(default_factory=dict)
     layers: list[Layer] = field(default_factory=list)
+    # Per port: logical -> physical LED order (lit LEDs, then dark ones), from the device. Not saved in profiles.
+    port_orders: dict[int, list[int]] = field(default_factory=dict)
 
     def leds_for(self, port: int) -> int:
         return self.port_leds.get(port, self.leds or 32)
 
-    def with_device_leds(self, counts_by_port: dict[int, int]) -> "Profile":
-        """Fill in LED counts the profile leaves open from the device's stored counts."""
-        if self.leds is not None:
-            return self
-        merged = {pt: n for pt, n in counts_by_port.items() if 1 <= n <= p.LEDS_PER_CHANNEL} | self.port_leds
-        return replace(self, port_leds=merged)
+    def wire_len(self, port: int) -> int:
+        """LEDs on the wire for this port (lit + dark)."""
+        order = self.port_orders.get(port)
+        return max(len(order), max(order) + 1) if order else self.leds_for(port)
+
+    def with_device_leds(self, counts_by_port: dict[int, int],
+                         orders_by_port: dict[int, list[int]] | None = None) -> "Profile":
+        """Fill in what the profile leaves open from the device: LED counts (unless the profile sets
+        `leds`) and the LED order of each port (when it matches the LED count used)."""
+        prof = self
+        if self.leds is None:
+            merged = {pt: n for pt, n in counts_by_port.items() if 1 <= n <= p.LEDS_PER_CHANNEL} | self.port_leds
+            prof = replace(prof, port_leds=merged)
+        if orders_by_port:
+            orders = {pt: o for pt, o in orders_by_port.items()
+                      if o and counts_by_port.get(pt) == prof.leds_for(pt)}
+            prof = replace(prof, port_orders=orders)
+        return prof
 
     @property
     def is_hardware(self) -> bool:

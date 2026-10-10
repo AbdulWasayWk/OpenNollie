@@ -53,11 +53,19 @@ class Renderer:
         return [(pt, [(offs[pt] + i) / total for i in range(self.profile.leds_for(pt))]) for pt in ports]
 
     def frame(self, t: float) -> dict[int, list[RGB]]:
+        """fw channel -> colors of the LEDs on the wire (the port's LED order applied, dark LEDs off)."""
         out = {}
+        orders = self.profile.port_orders
         for fn, targets in self._jobs:
             for port, us in targets:
                 n = self.profile.leds_for(port)
                 colors = [fn(t, us[0])] * n if len(us) == 1 else [fn(t, u) for u in us]
+                order = orders.get(port)
+                if order:
+                    wire = [(0, 0, 0)] * self.profile.wire_len(port)
+                    for i, c in enumerate(colors):
+                        wire[order[i]] = c
+                    colors = wire
                 out[p.PORT_TO_CH[port - 1]] = colors
         return out
 
@@ -88,7 +96,7 @@ def render_fseq(profile: Profile, progress: Callable[[int, int], None] | None = 
     r = Renderer(quantized)
     led_map = [0] * p.NUM_CHANNELS
     for port in r.ports:
-        led_map[p.PORT_TO_CH[port - 1]] = profile.leds_for(port)
+        led_map[p.PORT_TO_CH[port - 1]] = profile.wire_len(port)
     frame_bytes = sum(led_map) * 3
     if FSEQ_BASE + 64 + n * frame_bytes > FLASH_SIZE:
         raise ValueError(f"animation too large: {n} frames × {frame_bytes} B; lower fps, LEDs or period")
@@ -118,7 +126,7 @@ def hardware_canvases(profile: Profile) -> tuple[CanvasLayout, list[CanvasParams
         params.append(CanvasParams(
             effect=effect, brightness=round(100 * s.brightness),
             step=int(s.params.get("step", 1)), size=int(s.params.get("size", 1)),
-            delay=int(s.params.get("delay", 0)), vmap_process=int(s.params.get("vmap", 0)),
+            delay=int(s.params.get("delay", 0)), vmap_process=int(s.params.get("vmap", 1)),   # follow LED order
             color1=cols[0], color2=cols[1], color3=cols[2],
         ))
         chans.append([p.PORT_TO_CH[pt - 1] for pt in ports])

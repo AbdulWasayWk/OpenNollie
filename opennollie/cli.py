@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from . import client, engine, fseq, model, profile
+from . import client, engine, fseq, layouts, model, profile
 from . import protocol as p
 from .device import DeviceNotFound, NoResponse, Nollie16
 from .flash import Flash
@@ -232,6 +232,54 @@ def cmd_leds(dev: Nollie16, args) -> None:
         print(f"port {port:2d}: {counts[p.PORT_TO_CH[port - 1]]:3d} LEDs")
 
 
+def order_chase(order: list[int], leds: int, step: int, wire: int) -> list[RGB]:
+    """A light running in logical order: head white, short tail; the first LED of the order stays dim blue."""
+    frame = [(0, 0, 0)] * wire
+    frame[order[0]] = (0, 0, 60)
+    for k, level in ((0, 255), (1, 60), (2, 12)):
+        frame[order[(step - k) % leds]] = (level,) * 3
+    return frame
+
+
+def _fmt_order(order: list[int], leds: int) -> str:
+    lit = [x + 1 for x in order[:leds]]
+    return str(lit) if len(lit) <= 24 else f"[{', '.join(map(str, lit[:12]))}, …, {', '.join(map(str, lit[-4:]))}]"
+
+
+def cmd_order(dev: Nollie16, args) -> None:
+    """Show or set the order effects travel over a port's LEDs (stored on the device)."""
+    port, ch = args.port, p.PORT_TO_CH[args.port - 1]
+    counts, zleds = dev.led_counts(), dev.zled_counts()
+    if args.file:
+        layout = layouts.load(args.file)
+    else:
+        layout = layouts.strip(counts[ch], args.dark if args.dark is not None else zleds[ch])
+    changing = args.file or args.reverse or args.start or args.how != "as wired" or args.reset or args.dark is not None
+    if not changing:
+        cur = layouts.from_device(dev.led_index()[ch], counts[ch], zleds[ch]) or list(range(counts[ch] + zleds[ch]))
+        print(f"port {port}: {counts[ch]} LEDs + {zleds[ch]} dark, order {layouts.describe(cur, counts[ch])}: "
+              f"{_fmt_order(cur, counts[ch])}")
+        return
+    order = layouts.order(layout, args.how, args.reverse, (args.start or 1) - 1)
+    print(f"port {port}: {layout.leds} LEDs + {layout.zleds} dark ({layout.name}), "
+          f"order {layouts.describe(order, layout.leds)}: {_fmt_order(order, layout.leds)}")
+    if args.preview:
+        print("preview: a white light runs in this order (blue = first LED); Ctrl-C to stop")
+        with KeepAlive(dev) as ka:
+            step = 0
+            try:
+                while True:
+                    ka.show({c: [] for c in range(p.NUM_CHANNELS)} | {ch: order_chase(order, layout.leds, step, len(order))})
+                    step += 1
+                    time.sleep(0.15)
+            except KeyboardInterrupt:
+                pass
+        if input("store this order? [y/N] ").strip().lower() != "y":
+            return
+    layouts.apply(dev, port, order, layout.leds, layout.zleds, layout.name[:p.NAME_MAX_CHARS] if args.file else None)
+    print("stored")
+
+
 def ledtest_frame(n: int) -> list[RGB]:
     """LEDs 1..n-1 green, LED n blue (the last one if n is the count), LED n+1 red (shouldn't exist)."""
     return [(0, 60, 0)] * (n - 1) + [(0, 0, 255), (255, 0, 0)]
@@ -421,6 +469,18 @@ def main(argv=None) -> None:
                         description="e.g.  leds   |   leds 4-8,12-16=8 9=10")
     sp.add_argument("assignments", nargs="*", metavar="PORTS=COUNT")
     sp.set_defaults(func=cmd_leds)
+    sp = sub.add_parser("order", help="show or set the order effects travel over a port's LEDs",
+                        description="e.g.  order 4   |   order 4 --reverse --start 3 --preview   |   "
+                                    "order 9 --file 'Components/08LED_通用 - 8 LED.json' --how 'left → right'")
+    sp.add_argument("port", type=int, choices=range(1, p.NUM_CHANNELS + 1), metavar="PORT")
+    sp.add_argument("--file", help="SignalRGB component or Nollie vmap JSON (sets LED count, dark LEDs and order)")
+    sp.add_argument("--how", default="as wired", choices=layouts.ORDERS, help="needs a component file with coordinates")
+    sp.add_argument("--reverse", action="store_true", help="run the other way round")
+    sp.add_argument("--start", type=int, help="LED (1-based, as wired) the order starts at")
+    sp.add_argument("--dark", type=int, help="number of dark LEDs after the lit ones (strips only)")
+    sp.add_argument("--reset", action="store_true", help="back to the plain wiring order")
+    sp.add_argument("--preview", action="store_true", help="show a running light in the new order first")
+    sp.set_defaults(func=cmd_order)
     sp = sub.add_parser("ledtest", help="interactive: find how many LEDs a port has")
     sp.add_argument("port", type=int, choices=range(1, p.NUM_CHANNELS + 1), metavar="PORT")
     sp.add_argument("--start", type=int, help="initial guess (default: stored count, max 64)")

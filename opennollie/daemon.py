@@ -20,7 +20,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from . import engine, profile
+from . import engine, layouts, profile
 from . import protocol as p
 from .device import DeviceNotFound, HidTransport, NoResponse, Nollie16
 
@@ -138,8 +138,7 @@ class LiveRunner:
                 stop.wait(0.1)
                 continue
             try:
-                counts = self.dev.led_counts()
-                resolved = prof.with_device_leds({pt: counts[p.PORT_TO_CH[pt - 1]] for pt in range(1, 17)})
+                resolved = prof.with_device_leds(*layouts.read_ports(self.dev))
                 pause_or_stop = threading.Event()
                 watcher = threading.Thread(target=self._watch, args=(stop, pause_or_stop), daemon=True)
                 watcher.start()

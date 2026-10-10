@@ -319,10 +319,11 @@ class StudioPage(QWidget):
     icon = "applications-graphics"
     progress = Signal(str, int, int)
 
-    def __init__(self, device: Device, led_counts):
+    def __init__(self, device: Device, led_counts, orders=lambda: {}):
         super().__init__()
         self.device = device
         self.led_counts = led_counts          # callable -> {port: count} (from the Ports page)
+        self.orders = orders                  # callable -> {port: LED order} (from the Ports page)
         self.prof = Profile(name="New profile", layers=[new_layer()])
         self.path: Path | None = None
         self._live_stop: threading.Event | None = None
@@ -462,7 +463,7 @@ class StudioPage(QWidget):
     def current_profile(self) -> Profile:
         """The edited profile with LED counts from the controller (unless the profile sets its own)."""
         prof = replace(self.prof, layers=[l for l in self.prof.layers if l.ports])
-        return prof.with_device_leds(self.led_counts())
+        return prof.with_device_leds(self.led_counts(), self.orders())
 
     # --- preview ------------------------------------------------------------------------------
 

@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
                                QScrollArea, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import protocol as p
@@ -57,6 +57,9 @@ class CanvasCard(QFrame):
         form.addRow("Speed / size / delay", hbox(self.step, self.size, self.delay))
         self.colors = [ColorButton(params.color1), ColorButton(params.color2), ColorButton(params.color3)]
         form.addRow("Colors", hbox(*self.colors))
+        self.vmap = QCheckBox("Follow each port's LED order (Ports && LEDs → LED order)")
+        self.vmap.setChecked(bool(params.vmap_process))
+        form.addRow("", self.vmap)
         lay.addLayout(form)
 
     def set_index(self, i: int) -> None:
@@ -66,6 +69,7 @@ class CanvasCard(QFrame):
     def value(self) -> tuple[list[int], CanvasParams]:
         params = replace(self.params, effect=self.effect.currentIndex(), brightness=self.brightness.value(),
                          step=self.step.value(), size=self.size.value(), delay=self.delay.value(),
+                         vmap_process=int(self.vmap.isChecked()),
                          color1=self.colors[0].color(), color2=self.colors[1].color(), color3=self.colors[2].color())
         return self.picker.ports(), params
 
@@ -81,7 +85,7 @@ class CanvasSection(QGroupBox):
         for ms, label in FPS_CHOICES:
             self.fps.addItem(label, ms)
         add = QPushButton("Add canvas")
-        add.clicked.connect(lambda: self.add(CanvasParams(), []))
+        add.clicked.connect(lambda: self.add(CanvasParams(vmap_process=1), []))
         lay.addWidget(hbox("Frame rate", self.fps, add))
         self.box = QVBoxLayout()
         lay.addLayout(self.box)

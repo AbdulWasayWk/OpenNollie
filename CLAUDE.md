@@ -99,12 +99,12 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 | Home / Basic settings | controller name; fw version; boot playlist; direct-drive idle timeout; (GPIO: not on 16CH) | [x] GUI Device page + CLI |
 | Loop canvas / Boot canvas | canvases, ports per canvas, per-canvas effect + params, loop/start FPS | [x] loop canvases verified on hw; [ ] boot canvases (14+) not yet hw-tested |
 | LED settings | LED count per port, names | [x] |
-| LED settings | LED order remap (vmap: reverse/first), component presets (`Components/*.json`, `vmap/*.json`) | [ ] protocol done (`set_led_index`), no UI |
+| LED settings | LED order remap (vmap), component/vmap presets | [x] `layouts.py`, Ports page "LED order", CLI `order`; our engine applies the order to live/stored effects itself (fw only applies it to built-in effects with vmap_process) |
 | LED settings | auto-detect LED count | N/A on 16CH (fw lacks it); our `ledtest` replaces it |
 | Palette editor | 8 groups × 16 colors; import/export JSON | [x] (palette write verified; GUI not user-tested) |
 | FSEQ player | upload FSEQ (erase/write/verify), channel map, play/stop/loop | [x] verified on hw |
 | Device info | power (V/I/temp/load), flash chip, write count, stored FSEQ size | [x] |
-| Backup | export config JSON, factory reset, restart | [x] export, restart verified; [ ] **restore from JSON**; factory reset not run from our app |
+| Backup | export/restore config JSON, factory reset, restart | [x] export, restore, restart verified; factory reset not run from our app |
 | Power test | | N/A on 16CH |
 | Identify | light one port | [x] |
 | **OpenNollie extras** | live per-port colors; software effects engine (10 effects + custom keyframes), live or stored as FSEQ; profiles; daemon; GUI studio with case preview | [x] verified on hw (GUI pending user test) |
@@ -152,10 +152,12 @@ The app is **done** when every item below is checked. Keep this list current; it
       answers the CLI
 
 **Missing features (parity with NollieRGB 2.3.0)**
-- [ ] Restore settings from a backup JSON (GUI + CLI)
-- [ ] LED order editor (vmap / LED index: reverse, start offset), GUI + CLI
-- [ ] Component presets from the vendor's `Components/*.json` / `vmap/*.json` formats (user-supplied files, not
-      bundled, since they're the vendor's)
+- [x] Restore settings from a backup JSON (GUI + CLI): diff-based `model.restore`, `--dry-run`; verified on hw
+- [x] LED order editor (vmap / LED index: as wired / by position, reverse, start LED, dark LEDs), GUI dialog with
+      on-device preview + CLI `order`; LED-index write verified on hw (port 1 reverse/reset round trip).
+      [ ] User to check the preview/visual direction on a fan
+- [x] Layout presets: SignalRGB component JSON (`Components/*.json`) and Nollie vmap JSON (`vmap/*.json`), user-supplied
+      (not bundled); 237/238 vendor files load (1 vendor file is internally inconsistent and rejected, as in the app)
 
 **Polish**
 - [ ] Tray icon with quick profile switching (live / save to device)
@@ -230,6 +232,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: **LED order (vmap) semantics** (app `led_layout.py`): `index[i]` = physical LED at logical position i; lit LEDs
+  first, then zLEDs (dark). The firmware applies it only to built-in effects (canvas `vmap_process`); **live frames are
+  physical** (the app's preview chase writes `order[pos]` itself), so our Renderer maps logical→physical. Component
+  files are SignalRGB format (coords `[y, x]`; app orders = stable sort by x / y, ± reversed). Some vendor vmaps repeat
+  LEDs on purpose; one (Yico 2联) is inconsistent. Restore + LED-index writes verified on hw. (source: bytecode + hw)
 - 2026-10-11: Power draw with the 60 % rainbow FSEQ: 3.43 A @ 4.95 V (vs 0.75 A for 40 % static colors). Worth showing in
   the GUI; consider a brightness cap. Gotcha: `pgrep -f` also matches the Bash tool's zsh wrapper, so signal the
   python pid. (source: hardware)

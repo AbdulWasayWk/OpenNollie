@@ -1,13 +1,14 @@
 """Ports & LEDs page: names, LED counts, identify, LED-count test."""
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-                               QPushButton, QSpinBox, QTableWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
+                               QHeaderView, QLabel, QLineEdit, QPushButton, QSpinBox, QTableWidget, QVBoxLayout,
+                               QWidget)
 
-from .. import client
+from .. import client, layouts
 from .. import protocol as p
 from .caseview import CASE_LAYOUT
-from .common import Device, error
+from .common import Device, error, hbox
 
 RGB = tuple[int, int, int]
 
@@ -118,6 +119,117 @@ class LedTestDialog(QDialog):
         super().done(r)
 
 
+class LedOrderDialog(QDialog):
+    """Choose the order effects travel over a port's LEDs: this port's LEDs, or a preset file
+    (SignalRGB component / Nollie vmap). Previews as a running light on the device."""
+
+    applied = Signal()
+
+    def __init__(self, device: Device, port: int, leds: int, zleds: int, current: list[int] | None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"LED order: port {port}")
+        self.device, self.port = device, port
+        self.layout_ = layouts.strip(max(1, leds), zleds)
+        self.live = LiveSession(device, 150)
+        self.step = 0
+        self.anim = QTimer(self)
+        self.anim.setInterval(150)
+        self.anim.timeout.connect(self._tick)
+
+        form = QFormLayout(self)
+        self.source = QLabel()
+        pick, plain = QPushButton("Load preset file…"), QPushButton("This port's LEDs")
+        pick.clicked.connect(self._pick)
+        plain.clicked.connect(lambda: self._set_layout(layouts.strip(max(1, leds), zleds)))
+        form.addRow("Layout", self.source)
+        form.addRow("", hbox(plain, pick))
+        self.how = QComboBox()
+        self.how.addItems(layouts.ORDERS)
+        self.reverse = QCheckBox("Reverse")
+        self.start = QSpinBox()
+        self.start.setPrefix("start at LED ")
+        form.addRow("Order", hbox(self.how, self.reverse, self.start))
+        self.result = QLabel()
+        self.result.setWordWrap(True)
+        form.addRow("", self.result)
+        self.name_it = QCheckBox("Name the port after the preset")
+        form.addRow("", self.name_it)
+        self.preview = QCheckBox("Preview on the device (a white light runs in this order; blue = first LED)")
+        self.preview.toggled.connect(self._toggle_preview)
+        form.addRow("", self.preview)
+        buttons = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Apply).clicked.connect(self._apply)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        for sig in (self.how.currentIndexChanged, self.reverse.toggled, self.start.valueChanged):
+            sig.connect(self._update)
+        if current:      # start from what's stored: infer reverse / start for the plain wiring
+            desc = layouts.describe(current, leds)
+            self.reverse.setChecked(desc.startswith("reversed"))
+            if "starts at LED" in desc:
+                self.start.setValue(int(desc.rsplit(" ", 1)[1]))
+        self._set_layout(self.layout_, keep=True)
+
+    def _set_layout(self, layout: layouts.Layout, keep: bool = False) -> None:
+        self.layout_ = layout
+        self.source.setText(f"<b>{layout.name}</b>: {layout.leds} LEDs" + (f" + {layout.zleds} dark" if layout.zleds else ""))
+        self.how.setEnabled(bool(layout.coords))
+        if not layout.coords:
+            self.how.setCurrentIndex(0)
+        self.start.setRange(1, layout.leds)
+        if not keep:
+            self.start.setValue(1)
+            self.reverse.setChecked(False)
+        self.name_it.setVisible(layout.kind != "strip")
+        self.name_it.setChecked(layout.kind != "strip")
+        self._update()
+
+    def _pick(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "LED layout preset", "", "Layouts (*.json)")
+        if path:
+            try:
+                self._set_layout(layouts.load(path))
+            except Exception as e:
+                error(self, "Layout", e)
+
+    def order(self) -> list[int]:
+        return layouts.order(self.layout_, self.how.currentText(), self.reverse.isChecked(), self.start.value() - 1)
+
+    def _update(self, *_):
+        o = self.order()
+        lit = [x + 1 for x in o[: self.layout_.leds]]
+        text = ", ".join(map(str, lit)) if len(lit) <= 24 else ", ".join(map(str, lit[:12])) + ", …"
+        self.result.setText(f"Effects travel over the LEDs (as wired) in this order: {text}  "
+                            f"<i>({layouts.describe(o, self.layout_.leds)})</i>")
+
+    def _toggle_preview(self, on: bool) -> None:
+        if on:
+            self.live.start()
+            self.anim.start()
+        else:
+            self.anim.stop()
+            self.live.stop()
+
+    def _tick(self) -> None:
+        o, n = self.order(), self.layout_.leds
+        frame = [(0, 0, 0)] * len(o)
+        frame[o[0]] = (0, 0, 60)
+        for k, level in ((0, 255), (1, 60), (2, 12)):
+            frame[o[(self.step - k) % n]] = (level,) * 3
+        self.step += 1
+        self.live.show({self.port: frame})
+
+    def _apply(self) -> None:
+        o, L = self.order(), self.layout_
+        name = L.name[: p.NAME_MAX_CHARS] if self.name_it.isVisible() and self.name_it.isChecked() else None
+        self.device.run(lambda d: layouts.apply(d, self.port, o, L.leds, L.zleds, name),
+                        lambda _: (self.applied.emit(), self.accept()), lambda e: error(self, "LED order", e))
+
+    def done(self, r):
+        self.preview.setChecked(False)
+        super().done(r)
+
+
 class PortsPage(QWidget):
     title = "Ports && LEDs"
     icon = "preferences-desktop-display"
@@ -129,12 +241,14 @@ class PortsPage(QWidget):
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel("Names and LED counts are stored on the controller. Built-in effects and profiles use the "
                              "LED counts; the names label ports everywhere in this app."))
-        self.table = QTableWidget(p.NUM_CHANNELS, 5)
-        self.table.setHorizontalHeaderLabels(["Port", "Name", "LEDs", "", ""])
+        self.table = QTableWidget(p.NUM_CHANNELS, 6)
+        self.table.setHorizontalHeaderLabels(["Port", "Name", "LEDs", "", "", "LED order"])
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.names: dict[int, QLineEdit] = {}
         self.counts: dict[int, QSpinBox] = {}
+        self.order_buttons: dict[int, QPushButton] = {}
+        self._zleds = [0] * p.NUM_CHANNELS
         for row, port in enumerate(range(1, p.NUM_CHANNELS + 1)):
             item = QLabel(f"  {port}")
             self.table.setCellWidget(row, 0, item)
@@ -151,6 +265,10 @@ class PortsPage(QWidget):
             test = QPushButton("LED test…")
             test.clicked.connect(lambda _=False, pt=port: self._test(pt))
             self.table.setCellWidget(row, 4, test)
+            order = QPushButton("as wired")
+            order.clicked.connect(lambda _=False, pt=port: self._order(pt))
+            self.table.setCellWidget(row, 5, order)
+            self.order_buttons[port] = order
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         lay.addWidget(self.table)
@@ -162,6 +280,7 @@ class PortsPage(QWidget):
         row.addStretch(1)
         lay.addLayout(row)
         self._loaded = False
+        self._orders: dict[int, list[int]] = {}
 
     def showEvent(self, e):
         if not self._loaded:
@@ -170,13 +289,17 @@ class PortsPage(QWidget):
 
     def refresh(self) -> None:
         def load(d):
-            return d.led_counts(), [d.vmap_name(ch) for ch in range(p.NUM_CHANNELS)]
+            return (d.led_counts(), [d.vmap_name(ch) for ch in range(p.NUM_CHANNELS)], layouts.read_ports(d)[1],
+                    d.zled_counts())
         def show(r):
-            counts, names = r
+            counts, names, self._orders, self._zleds = r
             for port in self.names:
                 ch = p.PORT_TO_CH[port - 1]
                 self.counts[port].setValue(counts[ch])
                 self.names[port].setText(names[ch])
+                order = self._orders.get(port)
+                dark = f" + {self._zleds[ch]} dark" if self._zleds[ch] else ""
+                self.order_buttons[port].setText((layouts.describe(order, counts[ch]) if order else "as wired") + dark)
             self._loaded = True
             self.labels_changed.emit(self.labels())
         self.device.run(load, show)
@@ -186,6 +309,10 @@ class PortsPage(QWidget):
 
     def led_counts(self) -> dict[int, int]:
         return {pt: w.value() for pt, w in self.counts.items()}
+
+    def orders(self) -> dict[int, list[int]]:
+        """LED order per port as stored on the controller (only ports that aren't plain wiring order)."""
+        return dict(self._orders)
 
     def _apply(self) -> None:
         counts = [0] * p.NUM_CHANNELS
@@ -213,6 +340,12 @@ class PortsPage(QWidget):
         session.show({port: [(255, 255, 255)] * n})
         QTimer.singleShot(3000, session.stop)
         self.device.status.emit(f"Port {port} is lit white for 3 s")
+
+    def _order(self, port: int) -> None:
+        ch = p.PORT_TO_CH[port - 1]
+        dlg = LedOrderDialog(self.device, port, self.counts[port].value(), self._zleds[ch], self._orders.get(port), self)
+        dlg.applied.connect(self.refresh)
+        dlg.exec()
 
     def _test(self, port: int) -> None:
         dlg = LedTestDialog(self.device, port, max(1, min(self.counts[port].value(), 64)), self)

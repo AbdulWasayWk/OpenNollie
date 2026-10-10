@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
         self.device.status.connect(lambda msg: self.statusBar().showMessage(msg, 0 if msg.startswith("Error") else 8000))
 
         self.ports = PortsPage(self.device)
-        self.studio = StudioPage(self.device, self.ports.led_counts)
+        self.studio = StudioPage(self.device, self.ports.led_counts, self.ports.orders)
         self.canvases = CanvasPage(self.device)
         pages = [self.studio, self.canvases, self.ports, PalettePage(self.device), AnimationPage(self.device),
                  DevicePage(self.device)]
