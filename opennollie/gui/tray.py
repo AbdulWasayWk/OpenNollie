@@ -139,8 +139,8 @@ class Tray(QObject):
                 with client.connect() as dev:
                     if isinstance(dev.transport, client.DaemonTransport):
                         dev.transport.call("live_stop")        # stored lighting takes over
-                    prof = engine.prepare(dev, profile.load(path))
-                    msg = engine.save_to_device(dev, prof)
+                    prof = profile.load(path)
+                    msg = engine.save_profile(dev, prof)
                 self._note.emit("OpenNollie", f"'{prof.name}' {msg}")
             except Exception as e:
                 self._note.emit("OpenNollie: save failed", str(e))

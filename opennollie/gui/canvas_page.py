@@ -335,7 +335,9 @@ class CanvasPage(QWidget):
         self.labels.update(labels)
 
     def showEvent(self, e):
-        if not self._loaded:
+        # Read again each time: other pages (studio save, color balance) change the controller's groups too, and
+        # edits here are written as differences from what was read.
+        if not self._apply_timer.isActive():
             self.refresh()
         super().showEvent(e)
 

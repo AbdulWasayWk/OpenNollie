@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QHeaderView, QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QTableWidget,
                                QVBoxLayout, QWidget)
 
-from .. import calibration, client, layouts
+from .. import calibration, client, engine, layouts
 from .. import protocol as p
 from .common import Device, error, hbox
 
@@ -268,8 +268,11 @@ class ColorBalanceDialog(QDialog):
             value.setMinimumWidth(44)
             form.addRow(name, hbox(sl, value, stretch=False))
             self.sliders.append(sl)
-        form.addRow(QLabel("<small>Applies to live effects right away and to effects saved on the controller the "
-                           "next time you save them.</small>"))
+        note = QLabel("<small>The controller has no color balance of its own, so OpenNollie adjusts the colors it "
+                      "sends: live effects, and what you save to the controller from the Effects studio. "
+                      "<b>Save</b> also updates the effect saved on the controller.</small>")
+        note.setWordWrap(True)
+        form.addRow(note)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Reset | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Reset).setText("Reset to 100 %")
         buttons.button(QDialogButtonBox.Reset).clicked.connect(lambda: [sl.setValue(100) for sl in self.sliders])
@@ -400,6 +403,7 @@ class PortsPage(QWidget):
             counts[ch] = self.counts[port].value()
             names[ch] = self.names[port].text().strip()
         def write(d):
+            changed = d.led_counts() != counts
             d.set_led_counts(counts)
             old = [d.vmap_name(ch) for ch in range(p.NUM_CHANNELS)]
             for ch, name in names.items():
@@ -407,9 +411,15 @@ class PortsPage(QWidget):
                     d.set_vmap_name(ch, name)
             if d.led_counts() != counts:
                 raise IOError("the controller did not accept the LED counts (LED + zLED must be ≤ 256)")
-        self.device.run(write, lambda _: (self.device.status.emit("Ports saved to the controller"),
-                                          self.labels_changed.emit(self.labels())),
-                        lambda e: error(self, "Ports", e))
+            # a saved animation is drawn for the LED counts it was saved with: redo it for the new ones
+            return engine.update_saved(d) if changed else None
+        def done(updated):
+            msg = "Ports saved to the controller"
+            if updated and updated != engine.UP_TO_DATE:
+                msg += f"; the effect saved on the controller was updated for the new LED counts ({updated})"
+            self.device.status.emit(msg)
+            self.labels_changed.emit(self.labels())
+        self.device.run(write, done, lambda e: error(self, "Ports", e))
 
     def _identify(self, port: int) -> None:
         session = LiveSession(self.device, parent=self)
@@ -430,6 +440,18 @@ class PortsPage(QWidget):
         if dlg.exec():
             self._show_balance()
             self.labels_changed.emit(self.labels())      # the studio re-renders with the new balance
+            self._update_saved()
+
+    def _update_saved(self) -> None:
+        """The balance is baked into what's saved on the controller: store that again with the new one."""
+        self.device.status.emit("Color balance saved; updating the effect saved on the controller…")
+        def done(result):
+            self.device.status.emit(
+                "Color balance saved; the effect on the controller already matches" if result == engine.UP_TO_DATE else
+                f"Color balance saved and the effect on the controller updated ({result})" if result else
+                "Color balance saved. The controller isn't holding an effect saved from the Effects studio, so it "
+                "applies the next time you save one.")
+        self.device.run(engine.update_saved, done, lambda e: error(self, "Color balance", e))
 
     def _order(self, port: int) -> None:
         ch = p.PORT_TO_CH[port - 1]

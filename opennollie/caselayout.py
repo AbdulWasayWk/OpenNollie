@@ -79,14 +79,15 @@ def from_dict(d: dict) -> CaseLayout:
     return CaseLayout(items)
 
 
-def load(path: Path = PATH) -> CaseLayout | None:
+def load(path: Path | None = None) -> CaseLayout | None:
     """The saved layout, or None if there isn't one yet."""
     try:
-        return from_dict(json.loads(path.read_text()))
+        return from_dict(json.loads((path or PATH).read_text()))
     except (OSError, ValueError, TypeError):
         return None
 
 
-def save(layout: CaseLayout, path: Path = PATH) -> None:
+def save(layout: CaseLayout, path: Path | None = None) -> None:
+    path = path or PATH          # (looked up per call, so tests can point PATH elsewhere)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(to_dict(layout), indent=1))

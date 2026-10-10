@@ -14,11 +14,12 @@ from . import protocol as p
 from .device import Nollie16
 from .flash import FSEQ_BASE, Flash, crc32_nollie
 from .fseq import build_fseq
-from .profile import Layer, Profile
+from .profile import Layer, Profile, dumps as dumps_profile, loads as loads_profile
 from .protocol import BootIntro, BootSteady, CanvasLayout, CanvasParams, Mode, RGB
 
 FLASH_SIZE = 16 << 20
 MAX_LOOP_S = 120
+UP_TO_DATE = "already up to date"
 
 
 class Renderer:
@@ -141,51 +142,118 @@ def prepare(dev: Nollie16, profile: Profile) -> Profile:
     return profile.with_device_leds(*layouts.read_ports(dev)).with_calibration(calibration.load())
 
 
-def save_to_device(dev: Nollie16, profile: Profile, progress: Callable[[str, int, int], None] | None = None) -> str:
-    """Store the profile so it runs with no host software. Returns a short description."""
+def save_to_device(dev: Nollie16, profile: Profile, progress: Callable[[str, int, int], None] | None = None,
+                   source: Profile | None = None) -> str:
+    """Store the profile so it runs with no host software. Returns a short description.
+
+    `profile` comes from prepare() (LED counts, LED orders and color balance filled in). `source` is the
+    profile as written; when given it's remembered, so update_saved() can store it again after the color
+    balance or the LED counts change (they are baked into what the controller stores)."""
     progress = progress or (lambda *_: None)
-    flash = Flash(dev)
     if profile.is_static:
         layout, params = static_canvases(profile)
         dev.set_mode(Mode.HARDWARE)
         dev.set_canvases(layout, params)
         dev.set_boot_playlist(BootIntro.START_CANVAS, BootSteady.HW_EFFECTS)
         dev.set_mode(Mode.HARDWARE)
+        _remember(dev.serial, saved=_saved_entry("canvases", source, canvases=_canvas_sig(layout, params)))
         return f"stored as {len(params)} hardware canvas(es)"
+    rendered = _render_stored(profile, progress)
+    return _store_animation(dev, profile, rendered, progress, source)
+
+
+def save_profile(dev: Nollie16, source: Profile, progress: Callable[[str, int, int], None] | None = None) -> str:
+    """Save a profile as written (not yet prepared) to the controller, and remember it for update_saved()."""
+    return save_to_device(dev, prepare(dev, source), progress, source=source)
+
+
+def update_saved(dev: Nollie16, progress: Callable[[str, int, int], None] | None = None) -> str | None:
+    """Store the profile last saved from OpenNollie again, with the current color balance, LED counts and
+    LED orders. Only if the controller still holds that save: lighting set up some other way (e.g. on the
+    Built-in effects page) is left alone. Returns what happened, or None if there was nothing to update."""
+    progress = progress or (lambda *_: None)
+    saved = _state(dev.serial).get("saved")
+    if not saved or not saved.get("profile"):
+        return None
+    steady = dev.boot_playlist()[1]
+    if saved["kind"] == "canvases":
+        if steady != BootSteady.HW_EFFECTS or _canvas_sig(*dev.canvases()) != saved["canvases"]:
+            return None
+    else:
+        flash, anim = Flash(dev), _state(dev.serial).get("animation") or {}
+        info = flash.fseq_info()      # (not a flash access: these don't pause the LEDs)
+        if (steady != BootSteady.FSEQ_LOOP or not info.present or info.size != anim.get("size")
+                or flash.fseq_led_map() != anim.get("led_map")):
+            return None
+    source = loads_profile(saved["profile"])
+    prof = prepare(dev, source)
+    if prof.is_static:
+        if saved["kind"] == "canvases" and _canvas_sig(*static_canvases(prof)) == saved["canvases"]:
+            return UP_TO_DATE
+        return save_to_device(dev, prof, progress, source=source)
+    rendered = _render_stored(prof, progress)
+    if saved["kind"] == "animation" and rendered[2] == _state(dev.serial).get("animation"):
+        return UP_TO_DATE
+    return _store_animation(dev, prof, rendered, progress, source)
+
+
+def _render_stored(profile: Profile, progress) -> tuple[bytes, list[int], dict]:
     data, led_map = render_fseq(profile, lambda i, n: progress("render", i, n))
-    fingerprint = {"crc": crc32_nollie(data), "size": len(data), "led_map": led_map}
-    stored = _stored_animation(dev.serial)
+    return data, led_map, {"crc": crc32_nollie(data), "size": len(data), "led_map": led_map}
+
+
+def _store_animation(dev: Nollie16, profile: Profile, rendered: tuple[bytes, list[int], dict], progress,
+                     source: Profile | None) -> str:
+    data, led_map, fingerprint = rendered
+    flash = Flash(dev)
     info = flash.fseq_info()
-    unchanged = stored == fingerprint and info.present and info.size == len(data) and flash.fseq_led_map() == led_map
+    unchanged = (_state(dev.serial).get("animation") == fingerprint and info.present and info.size == len(data)
+                 and flash.fseq_led_map() == led_map)
     if not unchanged:        # (checked without touching flash: any flash access pauses the LEDs)
         info = flash.upload_fseq(data, led_map, progress)
         if not info.present:
             raise IOError("device does not report the uploaded animation")
-        _stored_animation(dev.serial, fingerprint)
+        _remember(dev.serial, animation=fingerprint)
     dev.set_boot_playlist(BootIntro.NONE, BootSteady.FSEQ_LOOP)
     if not flash.play(loop=True):
         flash.play(loop=True)
+    _remember(dev.serial, saved=_saved_entry("animation", source))
     n, _ = loop_frames(profile)
     what = "already stored, now playing" if unchanged else f"stored as animation, {len(data) // 1024} KiB"
     return f"{what}: {n} frames ({n / profile.fps:.1f} s loop)"
 
 
+def _canvas_sig(layout: CanvasLayout, params: list[CanvasParams]) -> list:
+    """What a static save writes (and what to compare the controller's canvases with)."""
+    return [[list(chans), prm.effect, prm.brightness, list(prm.color1)] for chans, prm in zip(layout.canvases, params)]
+
+
+def _saved_entry(kind: str, source: Profile | None, **extra) -> dict:
+    return {"kind": kind, "profile": dumps_profile(source) if source else None, **extra}
+
+
 STATE_FILE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "opennollie" / "stored.json"
 
 
-def _stored_animation(serial: str, fingerprint: dict | None = None) -> dict | None:
-    """Remember (or recall) what we last uploaded to this controller, so an unchanged profile isn't
-    rewritten: the controller pauses its LEDs while its flash is written."""
+def _state(serial: str) -> dict:
+    """What OpenNollie last stored on this controller: {"animation": fingerprint of the uploaded file,
+    "saved": the last save}. Kept so an unchanged animation isn't rewritten (the controller pauses its
+    LEDs while its flash is written) and so a save can be redone (update_saved)."""
+    try:
+        entry = json.loads(STATE_FILE.read_text()).get(serial) or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return {"animation": entry} if "crc" in entry else entry        # older files: just the fingerprint
+
+
+def _remember(serial: str, **values) -> None:
     try:
         state = json.loads(STATE_FILE.read_text())
     except (OSError, ValueError):
         state = {}
-    if fingerprint is None:
-        return state.get(serial)
-    state[serial] = fingerprint
+    state[serial] = _state(serial) | values
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state))
-    return fingerprint
 
 
 def run_live(dev: Nollie16, profile: Profile, stop: threading.Event | None = None,

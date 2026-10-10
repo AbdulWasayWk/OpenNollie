@@ -122,7 +122,8 @@ opennollie/
   fseq.py        # FSEQ v2 reader/writer
   effects.py     # software effects: f(t, position) -> RGB, all periodic
   profile.py     # TOML profiles (layers, groups); user dir + examples (opennollie/examples/)
-  engine.py      # Renderer, prepare() (LED counts/orders + color balance), live loop, render→FSEQ, save_to_device
+  engine.py      # Renderer, prepare() (LED counts/orders + color balance), live loop, render→FSEQ, save_profile,
+                 # update_saved (redo the last save after a balance / LED count change)
   layouts.py     # LED order (vmap) + SignalRGB/Nollie layout presets
   calibration.py # per-port color balance (PC side)
   caselayout.py  # the case picture (PC side)
@@ -250,6 +251,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - What exactly is mode SL (2)? It's seen for ~2–3 s after an FSEQ upload/stop; PLAY is ignored then.
 
 ## Findings log
+- 2026-10-11: **Bug: the unit tests overwrote the user's real color balance** with their test value (port 9 red 50 %).
+  `calibration.load/save(path=PATH)` bound the path as a default argument, so the tests' `mock.patch(PATH)` never
+  applied; `caselayout` had the same pattern (its tests pass explicit paths, so layout.json was safe). Fixed: paths are
+  looked up per call; the offline tests fail if the real calibration.toml changes. User's 15/20/100 restored.
+  Second cause of "balance resets": the balance is baked into what's saved on the controller, and changing it didn't
+  re-save, so the controller kept the old 50 % GPU color after the balance dialog closed. (source: user report + repro)
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
 - 2026-10-11: **User's GPU color balance: red 15 %, green 20 %, blue 100 %** (`calibration.toml`, port 9). The user
   confirms these are the values that make the GPU match the fans; it's only slightly dimmer, which is fine. Previews
@@ -257,7 +264,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - 2026-10-11: **GPU color balance differs**: same data, same timing, but its blue is weaker (cyan → greener, purple →
   pinker, white → yellowish), so a rainbow looks "ahead" on the GPU. Fixed with per-port color balance
   (`calibration.py`, `~/.config/opennollie/calibration.toml`; GUI Ports & LEDs → Color balance; CLI `balance`),
-  applied in Renderer and static canvases via `engine.prepare()`. (source: user step test)
+  applied in Renderer and static canvases via `engine.prepare()`; balance/LED-count changes re-save the stored
+  profile (`engine.update_saved`, verified on hw: GPU canvas #3333ff ↔ #2633ff). (source: user step test)
 - 2026-10-11: Regression found: `opennollie save` / foreground `live --duration` were broken since d44a293 (a text
   replacement deleted `cli.load_profile`). Unit tests never ran CLI commands. Added `tests/fakedevice.py` (simulated
   controller incl. flash + CRC) and `tests/test_offline_device.py` (CLI + save + balance + backup end to end).
@@ -317,6 +325,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
   Terminal-panel tool get lost while fish starts up, so the user runs them by hand.
 
 ## Decision log
+- 2026-10-11: Color balance stays PC-side and is applied when sending/saving (the firmware has none). OpenNollie
+  remembers the last profile it saved per controller (`stored.json` "saved") and **re-saves it when the balance or
+  LED counts change** (`engine.update_saved`: Ports page balance Save / Apply, CLI `balance` / `leds`), but only if
+  the controller still holds that save (same canvases, or same animation + boot loop); other lighting is left alone.
+  Built-in effects page colors are sent as picked (firmware-drawn; one color set per group).
 <!-- Newest first. Format: YYYY-MM-DD: decision; reason -->
 - 2026-10-11: Built-in effects apply **as you edit** (debounced 600 ms, only changed pieces written), like the official
   app; firmware "canvases" are presented as "groups". Colors are named "Color 1/2/3" (what color 3 does isn't known).

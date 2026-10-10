@@ -19,9 +19,9 @@ PATH = Path.home() / ".config" / "opennollie" / "calibration.toml"
 NEUTRAL: Gain = (1.0, 1.0, 1.0)
 
 
-def load(path: Path = PATH) -> dict[int, Gain]:
+def load(path: Path | None = None) -> dict[int, Gain]:
     try:
-        data = tomllib.loads(path.read_text())
+        data = tomllib.loads((path or PATH).read_text())
     except (OSError, ValueError):
         return {}
     out = {}
@@ -35,13 +35,14 @@ def load(path: Path = PATH) -> dict[int, Gain]:
     return out
 
 
-def save(gains: dict[int, Gain], path: Path = PATH) -> None:
+def save(gains: dict[int, Gain], path: Path | None = None) -> None:
     lines = ["# OpenNollie: per-port color balance (red, green, blue levels, 0..1).",
              "# Edit in the app: Ports & LEDs → Color balance, or: opennollie balance PORT R G B", ""]
     for port in sorted(gains):
         g = gains[port]
         if tuple(g) != NEUTRAL:
             lines += [f"[ports.{port}]", "gain = [" + ", ".join(f"{x:.3f}" for x in g) + "]", ""]
+    path = path or PATH          # (looked up per call, so tests can point PATH elsewhere)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines))
 

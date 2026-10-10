@@ -75,7 +75,7 @@ opennollie leds 4-8,12-16=8 9=6                  # LED counts per port
 opennollie ledtest 9                             # interactive: find a port's LED count
 opennollie order 4 --reverse --start 3 --preview # LED order of a port
 opennollie backup settings.json                  # all controller settings; restore with: opennollie restore
-opennollie balance 9 75 80 100                   # color balance of a port (red/green/blue %)
+opennollie balance 9 75 80 100                   # color balance of a port (red/green/blue %); updates the saved profile
 opennollie power                                 # input voltage/current, MCU temperature
 ```
 
@@ -117,6 +117,12 @@ brightness = 0.7
   `~/.config/opennollie/calibration.toml`. Previews show the intended colors; the balance only changes what is
   sent to a device so that it looks like the preview.
 
+**Color balance:** the controller has no color balance of its own, so OpenNollie adjusts the colors it sends:
+live effects on the fly, and saved profiles when they are written to the controller (static colors and animations
+alike). When you change a balance (or an LED count) later, the profile last saved from OpenNollie is saved again
+automatically so the controller matches. Lighting set up on the *Built-in effects* page is drawn by the controller
+from the colors you pick there, so the balance doesn't apply to it.
+
 **How "Save to device" stores a profile:** if every layer is `static`, it becomes the controller's built-in
 Solid canvases (instant). Otherwise the whole loop is rendered (frames = the least common multiple of the layers'
 cycle times, up to 120 s) and stored as an animation that plays at power-on. While the controller writes a new
@@ -140,7 +146,7 @@ Saving an unchanged profile again skips the write.
 | `~/.config/opennollie/profiles/*.toml` | your profiles |
 | `~/.config/opennollie/layout.json` | the case picture |
 | `~/.config/opennollie/calibration.toml` | color balance per port |
-| `~/.local/state/opennollie/` | the last edited profile, and a fingerprint of what's stored on the controller |
+| `~/.local/state/opennollie/` | the last edited profile, and what was last saved to the controller (to redo it when the balance or LED counts change) |
 
 The controller itself keeps its effects, LED counts, LED orders, port names and the stored animation.
 

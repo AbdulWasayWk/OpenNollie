@@ -228,6 +228,7 @@ def cmd_leds(dev: Nollie16, args) -> None:
         time.sleep(0.15)
         if dev.led_counts() != counts:
             sys.exit("device did not accept the LED counts (LED + zLED must be <= 256 per port)")
+        _update_saved(dev)
     for port in range(1, p.NUM_CHANNELS + 1):
         print(f"port {port:2d}: {counts[p.PORT_TO_CH[port - 1]]:3d} LEDs")
 
@@ -343,7 +344,11 @@ def cmd_balance(args) -> None:
     for port, g in sorted(gains.items()):
         print(f"port {port:2d}: red {g[0]:.0%}  green {g[1]:.0%}  blue {g[2]:.0%}")
     if args.port is not None:
-        print("applies to effects you start or save from now on")
+        try:
+            with client.connect() as dev:
+                _update_saved(dev)
+        except (DeviceNotFound, client.DaemonError, OSError) as e:
+            print(f"controller not reachable ({e}); this applies to effects you start or save from now on")
 
 
 def cmd_static(dev: Nollie16, args) -> None:
@@ -415,10 +420,22 @@ def cmd_live(dev: Nollie16, args) -> None:
 
 
 def cmd_save(dev: Nollie16, args) -> None:
-    prof = load_profile(dev, args.profile)
+    prof = profile.load(args.profile)
     print(f"saving '{prof.name}' to the device…")
-    result = engine.save_to_device(dev, prof, _progress)
+    result = engine.save_profile(dev, prof, _progress)
     print(("\n" if _last_progress[0] else "") + result)
+
+
+def _update_saved(dev: Nollie16) -> None:
+    """After a color balance / LED count change: store the last saved profile again so the controller matches."""
+    _last_progress[:] = [None, -1]
+    result = engine.update_saved(dev, _progress)
+    end = "\n" if _last_progress[0] else ""
+    if result is None:
+        print(end + "the controller isn't holding a profile saved from OpenNollie, so its lighting is unchanged; "
+              "this applies to effects you start or save from now on")
+    else:
+        print(end + f"lighting saved on the controller updated: {result}")
 
 
 def cmd_play(dev: Nollie16, args) -> None:

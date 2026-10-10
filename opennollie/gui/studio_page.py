@@ -613,7 +613,8 @@ class StudioPage(QWidget):
         self.dlg.setWindowTitle("Save to device")
         self.dlg.setMinimumDuration(0)
         self.dlg.setValue(0)
-        self.device.run(lambda d: engine.save_to_device(d, prof, lambda ph, a, b: self.progress.emit(ph, a, b)),
+        source = replace(self.prof, layers=[l for l in self.prof.layers if l.ports])
+        self.device.run(lambda d: engine.save_profile(d, source, lambda ph, a, b: self.progress.emit(ph, a, b)),
                         self._saved, lambda e: (self.dlg.close(), error(self, "Save to device", e)))
 
     def _on_progress(self, phase: str, done: int, total: int) -> None:

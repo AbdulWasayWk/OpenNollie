@@ -41,6 +41,10 @@ class Offline(unittest.TestCase):
         for pt in patches:
             pt.start()
             self.addCleanup(pt.stop)
+        real = Path.home() / ".config" / "opennollie" / "calibration.toml"
+        before = real.read_bytes() if real.exists() else None
+        self.addCleanup(lambda: self.assertEqual(real.read_bytes() if real.exists() else None, before,
+                                                 "a test changed the user's real color balance file"))
 
     def cli(self, *argv) -> str:
         out = io.StringIO()
@@ -79,6 +83,57 @@ class Offline(unittest.TestCase):
         self.assertEqual(frame[p.PORT_TO_CH[8]][0], (128, 255, 255))     # GPU: red at 50 %
         layout, params = engine.static_canvases(prof)
         self.assertEqual(sorted(prm.color1 for prm in params), [(128, 255, 255), (255, 255, 255)])
+
+    # --- color balance / LED counts changed after saving ------------------------------------
+
+    WHITE = '[[layer]]\nports = "4,5,9"\neffect = "static"\ncolor = "white"\nbrightness = 0.6'
+
+    def gpu_color(self):
+        layout, params = self.dev.canvases()
+        return next(prm.color1 for chans, prm in zip(layout.canvases, params) if p.PORT_TO_CH[8] in chans)
+
+    def test_new_balance_updates_saved_static_colors(self):
+        calibration.save({9: (0.5, 1.0, 1.0)})
+        engine.save_profile(self.dev, profile.loads(self.WHITE))
+        self.assertEqual(self.gpu_color(), (128, 255, 255))
+        calibration.save({9: (0.15, 0.2, 1.0)})
+        self.assertIn("hardware canvas", engine.update_saved(self.dev))
+        self.assertEqual(self.gpu_color(), (38, 51, 255))
+        self.assertEqual(engine.update_saved(self.dev), "already up to date")
+
+    def test_update_leaves_other_lighting_alone(self):
+        engine.save_profile(self.dev, profile.loads(self.WHITE))
+        self.cli("static", "4,5,9", "red")                 # set up some other way since
+        calibration.save({9: (0.5, 1.0, 1.0)})
+        n = len(self.fake.log)
+        self.assertIsNone(engine.update_saved(self.dev))
+        self.assertFalse([x for x in self.fake.log[n:] if x[0] == p.Cmd.SET_EFFECT and x[1] != p.EffectItem.MODE])
+        self.assertEqual(self.gpu_color(), (255, 0, 0))
+
+    def test_new_balance_updates_saved_animation(self):
+        anim = SMALL.replace('ports = "4,5"', 'ports = "4,5,9"')
+        engine.save_profile(self.dev, profile.loads(anim))
+        before = bytes(self.fake.flash[FSEQ_BASE:FSEQ_BASE + 60000])
+        self.assertEqual(engine.update_saved(self.dev), "already up to date")
+        calibration.save({9: (0.5, 1.0, 1.0)})
+        self.assertIn("stored as animation", engine.update_saved(self.dev))
+        self.assertNotEqual(bytes(self.fake.flash[FSEQ_BASE:FSEQ_BASE + 60000]), before)
+        self.assertTrue(self.fake.playing)
+        n = len(self.fake.log)
+        self.assertEqual(engine.update_saved(self.dev), "already up to date")
+        self.assertFalse([x for x in self.fake.log[n:] if x[0] in (p.Cmd.FLASH, p.Cmd.REC_CTRL)])
+
+    def test_cli_balance_and_leds_update_the_saved_profile(self):
+        self.cli("save", "groups-static")
+        out = self.cli("balance", "9", "50", "100", "100")
+        self.assertIn("updated", out)
+        self.assertIn("updated", self.cli("balance", "9", "--reset"))
+        self.assertIn("up to date", self.cli("leds", "4=10"))
+
+    def test_old_state_file_still_read(self):
+        engine.STATE_FILE.write_text(json.dumps({self.dev.serial: {"crc": 1, "size": 2, "led_map": [0] * 16}}))
+        self.assertEqual(engine._state(self.dev.serial), {"animation": {"crc": 1, "size": 2, "led_map": [0] * 16}})
+        self.assertIsNone(engine.update_saved(self.dev))
 
     # --- CLI ------------------------------------------------------------------------------
 
