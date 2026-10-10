@@ -59,3 +59,54 @@ OpenRGB's port order (`Channel 1..16`) → wire channel:
 - Is a frame without channel 31 ever displayed (i.e. is flag 2 really the latch)?
 - What do the 64-byte input reports carry (firmware version, status)?
 - Hardware effects and **save-to-device**: not in OpenRGB, so they come from the Phase 2 captures.
+
+---
+
+# Vendor app analysis (NollieRGB v2.3.0)
+
+Source: `NollieRGB_Portable_v2.3.0.zip` (sha256 `47a35eb0…dc79`), a PyInstaller build (Python 3.11 + PySide6 + cython-hidapi).
+Extract with `tools/re/pyi_extract.py`, then disassemble with `tools/re/disasm.py` (under Python 3.11).
+Module of interest: `app/core_driver/` (`n_usb_driver`, `n_dev_config`, `n_usb_flash_mixin`, `fseq_file`, `n_usb_event`).
+Tag: **[app]** = read from vendor bytecode, not yet tried on hardware.
+
+## Firmware generations **[app]**
+
+| Catalog name | VID:PID | tx/rx | Notes |
+|---|---|---|---|
+| `Nollie16_old` | `3061:4716` | 1024/64 | **Our device.** Legacy firmware. |
+| `Nollie16_2025` | `16D5:4716` | 1024/64 | Intermediate. |
+| `Nollie16` | `16D5:2A16` | 1024/1024 | Current firmware (`FIRMWARE_VERSION` 16). Features: flash ✔, fseq ✔, gpio ✘. |
+| `Bootloader_*` | `3061:F0xx` | — | Bootloader mode (`type` 1). |
+
+The app routes **every legacy device (not in `N_DEV_CURRENT_NAMES`) to `OTA_UPDATE`**, and current devices with an
+older fw version too (`app/services/device_flow.py: DeviceFlowService.decide`). The prompt says the update erases
+settings stored on the device. Firmware images ship in `config/Nollie16.bin` (RISC-V, likely a WCH CH32V).
+**Our tool must never send bootloader/OTA commands** (`0xFD` jump-BL, `0x81/0x83/0x84` bootloader).
+
+## Current-firmware command set **[app]**
+
+All commands go out as a single output report whose first byte is the command; responses come back as an input report.
+
+| Cmd | Name | Sub-commands |
+|---|---|---|
+| `0xFF` | SHOW_LED | |
+| `0xFD` | JUMP_BL | ⚠ bootloader, never send |
+| `0xFC` | GET_CONFIG | 1 version (buf[1]=fw, buf[2..3]=hw), 2 fw version `a.b.c`, 3 crash flag, 26 voltage |
+| `0xFA`/`0xF9` | SET/GET_EFFECT | 1 MODE, 2 CH_PARAM (per canvas), 3 CANVAS map, 4 CANVAS_LEN, 5 START_CANVAS_LEN, 6 FPS, 7 START_FPS, 8 LED_NUM (u16/ch), 9 ZLED_NUM, 10 GPIO, 11 START_CANVAS, 13 PALETTE, 14/15 DYNAMIC_1/2, 16 FSEQ_LED_NUM, 17 FSEQ_INFO, 18 FRAME_DELAY, 19 BOOT_PLAYLIST, 20 LED_DETECT, 32 INIT_START, 33/34 RESTORE_0/1, 35 SOFT_RESET |
+| `0xF8`/`0xF7` | SET/GET_LED_INDEX | |
+| `0xF6`/`0xF5` | SET/GET_CORE | 1 FIRST_UNIX, 2 UNIX, 3 WRITE_COUNT, 4 NAME_COUNT, 5 NAME_LEN, 6 NAME (UTF-16LE, ≤30 chars), 7 VMAP_NAME, 22 OL_IDLE (u16 s) |
+| `0xF4` | FLASH_OPERATION | 1 READ, 2 WRITE, 3 STATUS, 4 INFO, 5 ERASE, 6 WRITE_RAW, 7 CRC. 1024 B packets, ≤1016 B payload |
+| `0xF3` | REC_CTRL (FSEQ) | 1 ECHO, 2 PLAY (`[F3,02,0,0,loop]`), 3 STOP, 4 STATUS |
+| `0xF2` | SET_LED_STREAM | live stream, 8 B header, flag bit0 = show |
+
+Effect modes (`HID_EFFECT_MODE`): `0` FX_OL (online/streamed), `1` FX_HW (built-in effects), `2` FX_SL, `3` FX_FSEQ (play
+stored animation). `CH_PARAM` = `[FA, 02, canvas, mode, brightness, step, size, canvas_ch_len, vmap_process, delay,
+color1(3), color2(3), color3(3)]`. Palette = 8 groups × 16 colors (GRB). FSEQ files (xLights v2, uncompressed) are stored
+at flash `0x10000+` on a 16 MB GD25Q128.
+
+Built-in HW effects: Off, Solid, Breath, Scanning, Rainbow, Rainbow cycle, Meteor, Shake, Slowly wipe, Color wipe,
+Rainbow strip (+ l), Wave, Sunny, Pull flower, Stackab1–3, Integration1–2, Interchange, Bullets, Sequence,
+ColorFromPalette, Light up.
+
+The channel order (`N_DEV_CH_NAME['Nollie16']`: Channel 1→3, 2→2, 3→1, 4→0, 5→8 …) matches OpenRGB's `n16`, i.e. our
+`PORT_TO_HW` minus 16. **[app]** confirms the port map.

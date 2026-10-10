@@ -118,8 +118,9 @@ One action per capture, about 3 s between steps:
 - [ ] `08_save_static`: static colors on 2–3 channels → **Save to device**
 - [ ] `09_save_effect`: effect → **Save to device**
 - [ ] Observation: does the saved lighting come back after a reboot with the VM off?
-- [ ] Collect: app name/version, screenshots of all screens, the install folder copied to the
-      host (decompile it if it's .NET or Electron)
+- [x] Got the vendor app (NollieRGB v2.3.0 portable, in `vendor-app/`, gitignored). It's PyInstaller/Python 3.11, so
+      it decompiles to readable bytecode; see `docs/PROTOCOL.md` § Vendor app analysis. Tools: `tools/re/`
+- [ ] **DECISION PENDING (user):** stay on legacy firmware vs. let the official app update the firmware (see below)
 
 ### Phase 3: Protocol
 - [ ] Decode captures → `docs/PROTOCOL.md`
@@ -139,6 +140,9 @@ One action per capture, about 3 s between steps:
 - [ ] PKGBUILD, udev rule, systemd unit, README
 
 ## Open questions
+- **Firmware: our Nollie runs LEGACY firmware (`Nollie16_old`, 3061:4716).** App v2.3.0 forces an OTA update for
+  legacy devices and only supports save-to-device / effects / FSEQ on the current firmware (16D5:2A16). Which app
+  version is in the user's VM, and does it support the old firmware? Should the user update via the official app?
 - LED count per device? Not needed yet: we drive 256 LEDs/port and the extra data is ignored.
 - Windows app name and version? Is it .NET or Electron, i.e. can it be decompiled?
 - Which effects can the firmware store? Can it store custom or keyframe animations, or only
@@ -147,6 +151,10 @@ One action per capture, about 3 s between steps:
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-10: Vendor app v2.3.0 = PyInstaller (Py 3.11). Full current-firmware protocol recovered from bytecode
+  (commands 0xF2–0xFF: effects, palettes, boot playlist, idle fallback, flash, FSEQ animations). Our device is
+  `Nollie16_old`; the app sends legacy devices straight to OTA update. `config/Nollie16.bin` = RISC-V firmware image.
+  OpenRGB's udev rules already cover the post-update ID 16d5:2a16. (source: vendor-app/dis2)
 - 2026-10-10: Port → device mapping done via `identify` (see Port map); ports 1-3, 10, 11 are unused.
   (source: user observation)
 - 2026-10-10: Hardware test passed: `set all blue --brightness 30` turned all fans and the GPU dim blue, and the colors
