@@ -256,6 +256,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - What exactly is mode SL (2)? It's seen for ~2–3 s after an FSEQ upload/stop; PLAY is ignored then.
 
 ## Findings log
+- 2026-10-11: **Our udev rule only listed the legacy-firmware ID `3061:4716`**, so on a machine without OpenRGB the
+  package wouldn't have granted access to the fw 2.3.0 controller (`16d5:2a16`); here OpenRGB's 60-openrgb.rules did.
+  Fixed (rule lists `16d5:2a16`; `udevadm verify` passes). The user install script adds no rule (needs root): README
+  gives the command. (source: rule review while assessing other distros)
 - 2026-10-11: **After a factory reset the controller names unnamed ports "None"** (the official app treats "None" /
   "null" as no name; we do too, in `device.vmap_name`). Writing an empty name clears it. Port names only reach the
   controller on Ports & LEDs → Apply; the page now shows unapplied edits. (source: hw + app `_norm_vmap_name`)

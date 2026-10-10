@@ -24,7 +24,8 @@ Open-source Linux app for the **Nollie 16CH** RGB controller: per-port colors, c
   `3061:4716`; update them **once** with the official NollieRGB 2.3.0 app on Windows (a VM with USB passthrough
   works). OpenNollie never touches firmware.
 - Linux with Python ≥ 3.11, `python-hidapi`, `pyside6` (Arch package names)
-- Access to the device: the udev rule in `packaging/70-opennollie.rules` (OpenRGB's rules also cover it)
+- Access to the device: the udev rule in `packaging/70-opennollie.rules` (the package installs it; OpenRGB's rules
+  also cover the controller)
 
 ## Install
 
@@ -45,6 +46,13 @@ systemctl --user enable --now opennollie
 sudo pacman -S --needed git python-hidapi pyside6
 git clone https://github.com/AbdulWasayWk/OpenNollie.git
 cd OpenNollie && tools/install-user.sh
+```
+
+The user install doesn't add the device access rule (that needs root). If OpenRGB isn't installed, add it once:
+
+```bash
+sudo install -Dm644 packaging/70-opennollie.rules /etc/udev/rules.d/70-opennollie.rules
+sudo udevadm control --reload && sudo udevadm trigger
 ```
 
 Use one of the two, not both (to switch from the user install to the package, run `tools/install-user.sh --remove`
@@ -191,7 +199,8 @@ The controller itself keeps its effects, LED counts, LED orders, port names and 
 - **"Nollie 16CH 16d5:2a16 not found":** check `lsusb | grep -i nollie`. `3061:4716` means old firmware (see
   Requirements). If a VM used the controller, it may not be bound to Linux again; replug, or
   `tools/setup-dev.sh bind`.
-- **Permission denied:** install the udev rule (the package does), then replug.
+- **Permission denied:** the device access rule is missing: install the package, or add the rule as shown under
+  *Install* (user install), then replug the controller or log out and in.
 - **Service:** `systemctl --user status opennollie`, logs with `journalctl --user -u opennollie`.
 
 ## Development

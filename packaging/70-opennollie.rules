@@ -1,3 +1,3 @@
-# OpenNollie: give the logged-in user access to Nollie controllers.
+# OpenNollie: give the logged-in user access to the Nollie 16CH (firmware 2.3.0, USB 16d5:2a16).
 # Numbered below 73 so the uaccess tag is applied by systemd's 73-seat-late.rules.
-SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="3061", ATTRS{idProduct}=="4716", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="16d5", ATTRS{idProduct}=="2a16", TAG+="uaccess"
