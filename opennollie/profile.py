@@ -12,18 +12,18 @@
 
     [[layer]]                   # later layers win on ports they share with earlier ones
     ports = "all"               # "all", "4-9,12-16", or a group name
-    effect = "rainbow"          # see effects.EFFECTS, or "hw:<firmware effect name>"
+    effect = "rainbow"          # see effects.EFFECTS
     period = 8                  # seconds per cycle
-    spread = 1.0
+    spread = 1.0                # 0 = every port in sync; > 0 = the pattern flows across ports/LEDs
     brightness = 0.6
     unit = "port"               # "port": each port one color | "led": per LED
     span = "group"              # with unit = "led": "port" (each port its own strip) or "group"
     colors = ["#ff0000", "blue"]
     # any other keys go to the effect's params, e.g. keyframes = [[0, "red"], [0.5, "blue"]]
 
-Hardware layers (`effect = "hw:Breath"` etc.) run on the firmware's own effect engine. A profile
-whose layers are all `static` or `hw:` is stored on the device as canvases; anything else is
-rendered to an animation (FSEQ) or streamed live.
+A profile whose layers are all `static` (whole-port colors) is stored on the device as built-in
+canvases; anything else is rendered to an animation (FSEQ) or streamed live. The controller's own
+effects are edited on the GUI's Built-in effects page, not in profiles.
 """
 
 import tomllib
@@ -46,17 +46,6 @@ class Layer:
     spec: EffectSpec
     unit: str = "port"
     span: str = "group"
-
-    @property
-    def hw_effect(self) -> int | None:
-        """Firmware effect index for `hw:` layers, else None."""
-        if not self.spec.kind.startswith("hw:"):
-            return None
-        name = self.spec.kind[3:].strip().lower()
-        for i, e in enumerate(p.EFFECTS):
-            if e.lower() == name:
-                return i
-        raise ValueError(f"unknown firmware effect {name!r}; available: {', '.join(p.EFFECTS)}")
 
 
 @dataclass
@@ -93,9 +82,9 @@ class Profile:
         return prof
 
     @property
-    def is_hardware(self) -> bool:
-        """True if the device's own effect engine can run this profile (no rendering needed)."""
-        return all(l.spec.kind == "static" and l.unit == "port" or l.hw_effect is not None for l in self.layers)
+    def is_static(self) -> bool:
+        """True if every layer is a static whole-port color: stored as built-in Solid canvases."""
+        return all(l.spec.kind == "static" and l.unit == "port" for l in self.layers)
 
     def port_layers(self) -> dict[int, Layer]:
         """Which layer drives each port (last one wins)."""
@@ -138,8 +127,9 @@ def parse_ports(text: str | list[int], groups: dict[str, list[int]] | None = Non
 
 def layer_from_dict(d: dict, groups: dict[str, list[int]]) -> Layer:
     kind = str(d.get("effect", "static"))
-    if not kind.startswith("hw:") and kind not in EFFECTS:
-        raise ValueError(f"unknown effect {kind!r}; available: {', '.join(sorted(EFFECTS))} or hw:<name>")
+    if kind not in EFFECTS:
+        hint = " (the controller's built-in effects are set on the Built-in effects page)" if kind.startswith("hw:") else ""
+        raise ValueError(f"unknown effect {kind!r}; available: {', '.join(sorted(EFFECTS))}{hint}")
     colors = d.get("colors") or ([d["color"]] if "color" in d else ["white"])
     spec = EffectSpec(
         kind=kind,
@@ -155,9 +145,7 @@ def layer_from_dict(d: dict, groups: dict[str, list[int]]) -> Layer:
     if unit not in ("port", "led") or span not in ("port", "group"):
         raise ValueError("unit must be port|led, span must be port|group")
     layer = Layer(parse_ports(d.get("ports", "all"), groups), spec, unit, span)
-    layer.hw_effect  # validates hw: names
-    if not layer.spec.kind.startswith("hw:"):
-        spec.make()      # validates parameters early
+    spec.make()          # validates parameters early
     return layer
 
 

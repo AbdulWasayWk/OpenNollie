@@ -32,7 +32,16 @@ QUICK_GROUPS = {
 
 
 def new_layer() -> Layer:
-    return Layer(list(QUICK_GROUPS["All"]), EffectSpec("rainbow", period=8, spread=1.0, brightness=0.6))
+    return Layer(list(QUICK_GROUPS["All"]), EffectSpec("rainbow", period=8, spread=0.0, brightness=0.6))
+
+
+# How a layer's pattern is laid out: (label, unit, span, flows). "flows" = uses the spread amount.
+PATTERNS = [
+    ("All ports together (in sync)", "port", "group", False),
+    ("Flow across the ports", "port", "group", True),
+    ("Around each fan (fans in sync)", "led", "port", True),
+    ("Along all LEDs as one strip", "led", "group", True),
+]
 
 
 class ColorList(QWidget):
@@ -158,14 +167,11 @@ class LayerEditor(QGroupBox):
         ql.addStretch(1)
         form.addRow("Ports", self.picker)
         form.addRow("", quick)
-        form.addRow("", QLabel("<small>Effects travel across ports in the order you pick them.</small>"))
+        form.addRow("", QLabel("<small>Flowing patterns travel across ports in the order you pick them.</small>"))
 
         self.effect = QComboBox()
         for key, inf in EFFECT_INFO.items():
             self.effect.addItem(inf.label, key)
-        self.effect.insertSeparator(self.effect.count())
-        for name in p.EFFECTS[1:]:
-            self.effect.addItem(f"Built-in: {name}", f"hw:{name}")
         form.addRow("Effect", self.effect)
         self.help = QLabel()
         self.help.setWordWrap(True)
@@ -182,10 +188,16 @@ class LayerEditor(QGroupBox):
         self.period.setSingleStep(0.5)
         self.speed_label = QLabel("Cycle time")
         form.addRow(self.speed_label, self.period)
+        self.pattern = QComboBox()
+        for label, *_ in PATTERNS:
+            self.pattern.addItem(label)
+        form.addRow("Pattern", self.pattern)
         self.spread = QDoubleSpinBox()
-        self.spread.setRange(0, 4)
+        self.spread.setRange(0.05, 4)
         self.spread.setSingleStep(0.1)
-        form.addRow("Spread across ports", self.spread)
+        self.spread.setValue(1.0)
+        self.spread.setToolTip("How much of one cycle the pattern spans: 1 = one full cycle across the ports/LEDs")
+        form.addRow("Pattern spread", self.spread)
         self.brightness = QSlider(Qt.Horizontal)
         self.brightness.setRange(0, 100)
         form.addRow("Brightness", self.brightness)
@@ -193,26 +205,20 @@ class LayerEditor(QGroupBox):
         self.interp = QComboBox()
         self.interp.addItems(["smooth", "linear", "step"])
         form.addRow("Blending", hbox(self.interp, self.reverse))
-        self.unit = QComboBox()
-        self.unit.addItem("Whole port, one color", ("port", "group"))
-        self.unit.addItem("Per LED, each port separately", ("led", "port"))
-        self.unit.addItem("Per LED, across all the ports", ("led", "group"))
-        form.addRow("Applies to", self.unit)
 
         self.param_box = QWidget()
         self.param_form = QFormLayout(self.param_box)
         self.param_form.setContentsMargins(0, 0, 0, 0)
         form.addRow(self.param_box)
         self.param_widgets: dict[str, QWidget] = {}
-        self._rows = {"colors": self.colors, "keyframes": self.keyframes, "spread": self.spread,
-                      "interp": self.interp, "unit": self.unit}
         self.form = form
 
         for sig in (self.picker.changed, self.colors.changed, self.keyframes.changed, self.period.valueChanged,
                     self.spread.valueChanged, self.brightness.valueChanged, self.reverse.toggled,
-                    self.interp.currentIndexChanged, self.unit.currentIndexChanged):
+                    self.interp.currentIndexChanged):
             sig.connect(self._emit)
         self.effect.currentIndexChanged.connect(self._effect_changed)
+        self.pattern.currentIndexChanged.connect(self._pattern_changed)
 
     def _emit(self, *_):
         if not self._loading:
@@ -226,22 +232,26 @@ class LayerEditor(QGroupBox):
 
     def _effect_changed(self, *_):
         kind = self.effect.currentData()
-        hw = kind.startswith("hw:")
-        inf = EFFECT_INFO.get(kind)
-        self.help.setText(inf.help if inf else "Runs on the controller's own effect engine (no animation upload). "
-                          "Speed/size/delay use the controller's units. Can't be mixed with software effects.")
-        lo, hi = (1, 3) if hw else (inf.colors if inf.colors != (0, 0) else (0, 0))
+        inf = EFFECT_INFO[kind]
+        self.help.setText(inf.help)
+        lo, hi = inf.colors
         self._set_row_visible(self.colors, hi > 0)
         if hi > 0:
             self.colors.set(self.colors.colors(), (max(lo, 1), hi))
         self._set_row_visible(self.keyframes, kind == "keyframes")
         if kind == "keyframes" and not self.keyframes.frames():
             self.keyframes.set([[0, "#ff0000"], [0.5, "#0000ff"]])
-        for w in (self.period, self.spread, self.interp, self.unit, self.reverse):
-            self._set_row_visible(w, not hw and not (kind == "static" and w is not self.unit))
-        self._set_row_visible(self.spread, not hw and bool(inf and inf.uses_spread))
-        self.speed_label.setText("Cycle time")
+        animated = kind != "static"
+        for w in (self.period, self.interp, self.reverse, self.pattern):
+            self._set_row_visible(w, animated)
         self._build_params(kind)
+        self._pattern_changed()
+
+    def _pattern_changed(self, *_):
+        flows = PATTERNS[self.pattern.currentIndex()][3]
+        kind = self.effect.currentData()
+        self._set_row_visible(self.spread, kind != "static" and flows)
+        self.reverse.setEnabled(flows)
         self._emit()
 
     def _build_params(self, kind: str, values: dict | None = None) -> None:
@@ -249,16 +259,6 @@ class LayerEditor(QGroupBox):
             self.param_form.removeRow(0)
         self.param_widgets = {}
         values = values or {}
-        if kind.startswith("hw:"):
-            specs = [("step", "Speed (step)", 1), ("size", "Size", 1), ("delay", "Delay", 0)]
-            for key, label, default in specs:
-                w = QSpinBox()
-                w.setRange(0, 255)
-                w.setValue(int(values.get(key, default)))
-                w.valueChanged.connect(self._emit)
-                self.param_form.addRow(label, w)
-                self.param_widgets[key] = w
-            return
         for prm in EFFECT_INFO[kind].params:
             if prm.kind == "bool":
                 w = QCheckBox()
@@ -277,22 +277,24 @@ class LayerEditor(QGroupBox):
         self._loading = True
         s = layer.spec
         self.picker.set_ports(layer.ports)
-        i = self.effect.findData(s.kind)
-        if i < 0:   # hw effect written with different case
-            i = next((k for k in range(self.effect.count())
-                      if str(self.effect.itemData(k)).lower() == s.kind.lower()), 0)
+        i = max(0, self.effect.findData(s.kind))
         self.effect.blockSignals(True)
         self.effect.setCurrentIndex(i)
         self.effect.blockSignals(False)
         self.colors.set(s.colors, (1, 8))
         self.keyframes.set(s.params.get("keyframes", []))
         self.period.setValue(s.period)
-        self.spread.setValue(s.spread)
+        if s.spread > 0:
+            self.spread.setValue(s.spread)
+        flows = s.spread > 0 or layer.unit == "led"
+        idx = next(i for i, (_, unit, span, fl) in enumerate(PATTERNS)
+                   if unit == layer.unit and (span == layer.span or unit == "port") and fl == flows)
+        self.pattern.blockSignals(True)
+        self.pattern.setCurrentIndex(idx)
+        self.pattern.blockSignals(False)
         self.brightness.setValue(round(s.brightness * 100))
         self.reverse.setChecked(s.reverse)
         self.interp.setCurrentText(s.interp)
-        self.unit.setCurrentIndex({("port", "group"): 0, ("port", "port"): 0, ("led", "port"): 1,
-                                   ("led", "group"): 2}[(layer.unit, layer.span)])
         self._effect_changed()
         self._build_params(self.effect.currentData(), s.params)
         self._loading = False
@@ -306,8 +308,11 @@ class LayerEditor(QGroupBox):
         if kind == "keyframes":
             params["keyframes"] = self.keyframes.frames()
         colors = self.colors.colors() if self.colors.isVisibleTo(self) else [(255, 255, 255)]
-        unit, span = self.unit.currentData()
-        spec = EffectSpec(kind, colors=colors, period=self.period.value(), spread=self.spread.value(),
+        _, unit, span, flows = PATTERNS[self.pattern.currentIndex()]
+        if kind == "static":
+            unit, span, flows = "port", "group", False
+        spec = EffectSpec(kind, colors=colors, period=self.period.value(),
+                          spread=round(self.spread.value(), 3) if flows else 0.0,
                           brightness=self.brightness.value() / 100, reverse=self.reverse.isChecked(),
                           interp=self.interp.currentText(), params=params)
         return Layer(self.picker.ports() or [], spec, unit, span)
@@ -415,8 +420,7 @@ class StudioPage(QWidget):
         self._rebuild()
 
     def _layer_title(self, l: Layer) -> str:
-        kind = l.spec.kind
-        name = kind[3:] + " (built-in)" if kind.startswith("hw:") else EFFECT_INFO[kind].label
+        name = EFFECT_INFO[l.spec.kind].label
         ports = profile._ports_text(l.ports) if l.ports else "no ports"
         return f"{name} — {ports}"
 
@@ -468,24 +472,15 @@ class StudioPage(QWidget):
 
     def _rebuild(self) -> None:
         prof = self.current_profile()
-        hw = [l for l in prof.layers if l.hw_effect is not None]
-        problems = []
-        if hw and not prof.is_hardware:
-            problems.append("Built-in effects can't be mixed with software effects in one profile.")
-        preview = replace(prof, layers=[l if l.hw_effect is None else
-                                        replace(l, spec=EffectSpec("static", colors=l.spec.colors[:1]))
-                                        for l in prof.layers])
         try:
-            self._renderer = engine.Renderer(preview) if preview.layers else None
+            self._renderer = engine.Renderer(prof) if prof.layers else None
             n, _ = engine.loop_frames(prof) if prof.layers else (0, [])
-            how = ("stored as built-in canvases" if prof.is_hardware else
+            how = ("stored as built-in Solid canvases" if prof.is_static else
                    f"stored as a {n / prof.fps:.1f} s seamless animation")
+            self.note.setText(f"Save to device: {how}.")
         except ValueError as e:
-            self._renderer, how = None, ""
-            problems.append(str(e))
-        hint = " Built-in effects are previewed as their first color." if hw else ""
-        self.note.setText(("<span style='color:#e05050'>" + " ".join(problems) + "</span>") if problems else
-                          f"Save to device: {how}.{hint}")
+            self._renderer = None
+            self.note.setText(f"<span style='color:#e05050'>{e}</span>")
         if self.live_btn.isChecked():
             self._live_restart.start()
 
@@ -528,9 +523,9 @@ class StudioPage(QWidget):
 
     def _live_update(self) -> None:
         prof = self.current_profile()
-        if prof.is_hardware or not prof.layers:
+        if not prof.layers:
             self.live_btn.setChecked(False)
-            error(self, "Preview", "Built-in effects run on the controller: use Save to device to try them.")
+            error(self, "Preview", "Pick some ports first.")
             return
         text = profile.dumps(prof)
         if self.device.via_daemon:

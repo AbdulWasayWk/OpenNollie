@@ -137,9 +137,8 @@ def _wave(s: EffectSpec) -> Effect:
     fg = s.colors[0]
     bg = s.colors[1] if len(s.colors) > 1 else (0, 0, 0)
     width = float(s.params.get("width", 0.5))
-    spread = s.spread or 1.0
     def f(t, u):
-        d = _phase(t, u, s.period, spread, not s.reverse)
+        d = _phase(t, u, s.period, s.spread, not s.reverse)
         d = min(d, 1 - d) * 2                     # 0 at the crest, 1 opposite
         k = max(0.0, 1 - d / max(width, 1e-6))
         return lerp(bg, fg, 0.5 - 0.5 * math.cos(math.pi * k))
@@ -151,9 +150,8 @@ def _comet(s: EffectSpec) -> Effect:
     head = s.colors[0]
     bg = s.colors[1] if len(s.colors) > 1 else (0, 0, 0)
     tail = float(s.params.get("tail", 0.3))
-    spread = s.spread or 1.0
     def f(t, u):
-        behind = _phase(t, u, s.period, spread, not s.reverse)
+        behind = _phase(t, u, s.period, s.spread, not s.reverse)
         k = max(0.0, 1 - behind / max(tail, 1e-6))
         return lerp(bg, head, k * k)
     return f
@@ -235,12 +233,12 @@ class EffectInfo:
 
 EFFECT_INFO: dict[str, EffectInfo] = {
     "static": EffectInfo("Static", "One solid color.", (1, 1), uses_spread=False),
-    "gradient": EffectInfo("Gradient", "Colors spread across the ports/LEDs; can scroll.", (2, 8),
+    "gradient": EffectInfo("Gradient", "Colors spread across the ports/LEDs (pick a flowing pattern); can scroll.", (2, 8),
                            (Param("scroll", "Scroll", "bool", False),), uses_spread=False),
     "breathe": EffectInfo("Breathe", "Fade in and out; each breath uses the next color.", (1, 8),
                           (Param("min", "Minimum level", "float", 0.0, 0.0, 0.9),)),
     "cycle": EffectInfo("Color cycle", "Step through the colors, fading between them.", (2, 8)),
-    "rainbow": EffectInfo("Rainbow", "All hues; spread 1 shows the whole rainbow across the group.", (0, 0),
+    "rainbow": EffectInfo("Rainbow", "Cycles through every hue. With a flowing pattern, the ports show different hues at once.", (0, 0),
                           (Param("saturation", "Saturation", "float", 1.0, 0.0, 1.0),)),
     "wave": EffectInfo("Wave", "A soft band of the first color travelling over the second.", (1, 2),
                        (Param("width", "Band width", "float", 0.5, 0.05, 1.0),)),

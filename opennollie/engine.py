@@ -21,8 +21,6 @@ class Renderer:
     """Turns a (software) profile into frames: fw channel -> LED colors."""
 
     def __init__(self, profile: Profile):
-        if any(l.hw_effect is not None for l in profile.layers):
-            raise ValueError("hw: effects run on the device; they can't be rendered or mixed with software effects")
         self.profile = profile
         owner = profile.port_layers()
         self._jobs = []        # (effect fn, [(port, [u per LED] or u)])
@@ -110,28 +108,20 @@ def render_fseq(profile: Profile, progress: Callable[[int, int], None] | None = 
     return data, led_map
 
 
-def hardware_canvases(profile: Profile) -> tuple[CanvasLayout, list[CanvasParams]]:
-    """Map an all-hardware profile to device canvases (one per layer that still owns ports)."""
-    if not profile.is_hardware:
-        raise ValueError("profile uses software effects; render it instead")
+def static_canvases(profile: Profile) -> tuple[CanvasLayout, list[CanvasParams]]:
+    """An all-static profile as device canvases: one Solid canvas per layer that still owns ports."""
+    if not profile.is_static:
+        raise ValueError("profile has animated effects; render it instead")
     owner = profile.port_layers()
     chans, params = [], []
     for layer in profile.layers:
         ports = [pt for pt in layer.ports if owner.get(pt) is layer]
-        if not ports:
-            continue
-        s = layer.spec
-        cols = (s.colors + [(255, 255, 0), (0, 255, 255)])[:3]
-        effect = layer.hw_effect if layer.hw_effect is not None else p.EFFECTS.index("Solid")
-        params.append(CanvasParams(
-            effect=effect, brightness=round(100 * s.brightness),
-            step=int(s.params.get("step", 1)), size=int(s.params.get("size", 1)),
-            delay=int(s.params.get("delay", 0)), vmap_process=int(s.params.get("vmap", 1)),   # follow LED order
-            color1=cols[0], color2=cols[1], color3=cols[2],
-        ))
-        chans.append([p.PORT_TO_CH[pt - 1] for pt in ports])
+        if ports:
+            params.append(CanvasParams(effect=p.EFFECTS.index("Solid"), brightness=round(100 * layer.spec.brightness),
+                                       color1=layer.spec.colors[0]))
+            chans.append([p.PORT_TO_CH[pt - 1] for pt in ports])
     if len(params) > p.LOOP_CANVAS_MAX:
-        raise ValueError(f"at most {p.LOOP_CANVAS_MAX} hardware layers")
+        raise ValueError(f"at most {p.LOOP_CANVAS_MAX} static layers")
     return CanvasLayout(chans), params
 
 
@@ -139,8 +129,8 @@ def save_to_device(dev: Nollie16, profile: Profile, progress: Callable[[str, int
     """Store the profile so it runs with no host software. Returns a short description."""
     progress = progress or (lambda *_: None)
     flash = Flash(dev)
-    if profile.is_hardware:
-        layout, params = hardware_canvases(profile)
+    if profile.is_static:
+        layout, params = static_canvases(profile)
         flash.stop()
         dev.set_canvases(layout, params)
         dev.set_boot_playlist(BootIntro.START_CANVAS, BootSteady.HW_EFFECTS)
@@ -160,7 +150,7 @@ def save_to_device(dev: Nollie16, profile: Profile, progress: Callable[[str, int
 def run_live(dev: Nollie16, profile: Profile, stop: threading.Event | None = None,
              duration: float | None = None) -> None:
     """Stream the profile until `stop` is set (or `duration` seconds pass)."""
-    r = Renderer(profile)      # rejects hw: layers, which only run on the device
+    r = Renderer(profile)
     stop = stop or threading.Event()
     blank = {ch: [] for ch in range(p.NUM_CHANNELS)}
     dt = 1 / profile.fps

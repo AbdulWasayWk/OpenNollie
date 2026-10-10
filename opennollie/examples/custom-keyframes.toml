@@ -20,5 +20,6 @@ ports = "rear"
 effect = "comet"
 colors = ["#ffa040", "#100008"]   # head, background
 period = 3
+spread = 1.0                      # the comet runs across the ports (0 would flash them all together)
 tail = 0.6
 brightness = 0.8

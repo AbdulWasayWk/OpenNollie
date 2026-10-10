@@ -132,7 +132,7 @@ def cmd_render(args) -> None:
 def cmd_effects(args) -> None:
     from .effects import EFFECTS
     print("software effects:", ", ".join(sorted(EFFECTS)))
-    print("hardware effects (effect = \"hw:<name>\"):", ", ".join(p.EFFECTS))
+    print("the controller's own effects (Built-in effects page / canvases):", ", ".join(p.EFFECTS))
 
 
 def live_frame(assign: dict[int, RGB], leds: int) -> dict[int, list[RGB]]:

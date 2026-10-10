@@ -4,7 +4,7 @@ import unittest
 
 from opennollie import protocol as p
 from opennollie.effects import EffectSpec, palette_at, parse_color
-from opennollie.engine import Renderer, hardware_canvases, loop_frames, render_fseq
+from opennollie.engine import Renderer, loop_frames, render_fseq
 from opennollie.fseq import led_map_matches, parse_header
 from opennollie.profile import loads, parse_ports
 
@@ -59,7 +59,7 @@ class Profiles(unittest.TestCase):
         self.assertEqual(prof.groups["exhaust"], [4, 5])
         self.assertEqual(prof.leds_for(9), 6)
         self.assertEqual(prof.port_layers()[4].spec.kind, "static")    # later layer wins
-        self.assertFalse(prof.is_hardware)
+        self.assertFalse(prof.is_static)
 
     def test_device_led_counts(self):
         prof = loads('[ports.9]\nleds = 12\n[[layer]]\neffect = "rainbow"')
@@ -112,16 +112,25 @@ class Rendering(unittest.TestCase):
         self.assertEqual(hdr.frame_count, 12)
         self.assertIsNone(led_map_matches(hdr, led_map))
 
-    def test_hardware_profile(self):
-        prof = loads('[[layer]]\nports = "4,5"\neffect = "hw:Breath"\ncolors = ["red"]\nbrightness = 0.5\n'
+    def test_static_profile_becomes_canvases(self):
+        from opennollie.engine import static_canvases
+        prof = loads('[[layer]]\nports = "4,5"\neffect = "static"\ncolor = "red"\nbrightness = 0.5\n'
                      '[[layer]]\nports = "9"\neffect = "static"\ncolor = "white"')
-        self.assertTrue(prof.is_hardware)
-        layout, params = hardware_canvases(prof)
+        self.assertTrue(prof.is_static)
+        layout, params = static_canvases(prof)
         self.assertEqual(layout.canvases, [[0, 8], [4]])
-        self.assertEqual((params[0].effect, params[0].brightness, params[0].color1), (2, 50, (255, 0, 0)))
-        self.assertEqual(params[1].effect, p.EFFECTS.index("Solid"))
+        self.assertEqual((params[0].effect, params[0].brightness, params[0].color1), (1, 50, (255, 0, 0)))
+
+    def test_builtin_effects_are_not_profile_effects(self):
         with self.assertRaises(ValueError):
-            Renderer(prof)
+            loads('[[layer]]\neffect = "hw:Breath"')
+
+    def test_spread_zero_keeps_ports_in_sync(self):
+        for kind in ("rainbow", "breathe", "wave", "comet", "cycle"):
+            prof = loads(f'leds = 1\n[[layer]]\nports = "4,5,6,7"\neffect = "{kind}"\ncolors = ["red", "blue"]\n'
+                         f'period = 2\nspread = 0')
+            f = Renderer(prof).frame(0.37)
+            self.assertEqual(len({tuple(c[0]) for c in f.values() if c}), 1, f"{kind} not in sync")
 
 
 if __name__ == "__main__":
