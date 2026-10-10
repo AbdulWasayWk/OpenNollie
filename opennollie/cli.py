@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from . import engine, fseq, profile
+from . import client, engine, fseq, profile
 from . import protocol as p
 from .device import DeviceNotFound, NoResponse, Nollie16
 from .flash import Flash
@@ -134,6 +134,7 @@ class KeepAlive:
         self.dev, self.frame = dev, None
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
+        self.daemon = dev.transport if isinstance(dev.transport, client.DaemonTransport) else None
 
     def show(self, frame) -> None:
         self.frame = frame
@@ -146,10 +147,16 @@ class KeepAlive:
             self.dev.send_frame(self.frame)
 
     def __enter__(self):
+        if self.daemon:
+            self.daemon.call("live_pause")       # the daemon's live effect yields while we drive the LEDs
         return self
 
     def __exit__(self, *exc):
         self.stop.set()
+        if self.thread.is_alive():
+            self.thread.join(timeout=2)
+        if self.daemon:
+            self.daemon.call("live_resume")
 
 
 def hold(args) -> None:
@@ -290,10 +297,30 @@ def _progress(phase: str, done: int, total: int) -> None:
 
 
 def cmd_live(dev: Nollie16, args) -> None:
+    daemon = dev.transport if isinstance(dev.transport, client.DaemonTransport) else None
+    if args.stop or args.status:
+        if not daemon:
+            sys.exit("the daemon isn't running (foreground live effects stop with Ctrl-C)")
+        if args.stop:
+            daemon.call("live_stop")
+        print(daemon.call("live_status"))
+        return
+    if not args.profile:
+        sys.exit("usage: live PROFILE | live --stop | live --status")
+    if daemon and args.duration is None:
+        name = daemon.call("live_start", profile=open(args.profile).read(), source=args.profile)["name"]
+        print(f"'{name}' is running in the daemon; stop it with: opennollie live --stop")
+        return
     prof = load_profile(dev, args.profile)
     print(f"streaming '{prof.name}' at {prof.fps} fps; Ctrl-C to stop "
           f"(the device returns to its stored lighting ~3 s after)")
-    engine.run_live(dev, prof, duration=args.duration)
+    if daemon:
+        daemon.call("live_pause")
+    try:
+        engine.run_live(dev, prof, duration=args.duration)
+    finally:
+        if daemon:
+            daemon.call("live_resume")
 
 
 def cmd_save(dev: Nollie16, args) -> None:
@@ -385,8 +412,10 @@ def main(argv=None) -> None:
     sp.add_argument("mode", nargs="?", choices=[m.name.lower() for m in Mode])
     sp.set_defaults(func=cmd_mode)
 
-    sp = sub.add_parser("live", help="stream a profile live (runs until Ctrl-C)")
-    sp.add_argument("profile")
+    sp = sub.add_parser("live", help="run a profile live (in the daemon if it's running, else until Ctrl-C)")
+    sp.add_argument("profile", nargs="?")
+    sp.add_argument("--stop", action="store_true", help="stop the daemon's live effect")
+    sp.add_argument("--status", action="store_true", help="show the daemon's live effect")
     sp.add_argument("--duration", type=float, help="stop after this many seconds")
     sp.set_defaults(func=cmd_live)
     sp = sub.add_parser("save", help="store a profile on the device (runs with no software)")
@@ -421,9 +450,9 @@ def main(argv=None) -> None:
         ap.error("--brightness must be 0-100")
 
     try:
-        with Nollie16() as dev:
+        with client.connect() as dev:
             args.func(dev, args)
-    except (DeviceNotFound, NoResponse, ValueError, OSError) as e:
+    except (DeviceNotFound, NoResponse, client.DaemonError, ValueError, OSError) as e:
         sys.exit(str(e))
     except KeyboardInterrupt:
         pass

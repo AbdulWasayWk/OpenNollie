@@ -29,8 +29,8 @@ def find_path() -> bytes:
     raise DeviceNotFound(f"Nollie 16CH {p.VID:04x}:{p.PID:04x} not found{hint}")
 
 
-class Nollie16:
-    """One open Nollie. Thread-safe: each request/response pair holds a lock."""
+class HidTransport:
+    """Direct hidapi access to interface 0. Thread-safe: each call holds a lock."""
 
     def __init__(self, path: bytes | None = None):
         self.path = path or find_path()
@@ -41,20 +41,16 @@ class Nollie16:
     def close(self) -> None:
         self._dev.close()
 
-    def __enter__(self) -> "Nollie16":
-        return self
+    @property
+    def serial(self) -> str:
+        return self._dev.get_serial_number_string()
 
-    def __exit__(self, *exc) -> None:
-        self.close()
-
-    # --- transport ----------------------------------------------------------------------------
-
-    def send(self, packet: bytes) -> None:
+    def send_many(self, packets: Sequence[bytes]) -> None:
         with self._lock:
-            self._write(packet)
+            for pkt in packets:
+                self._write(pkt)
 
     def query(self, packet: bytes, timeout_ms: int = READ_TIMEOUT_MS) -> bytes:
-        """Send a GET and return its 1024-byte reply."""
         with self._lock:
             self._drain()
             self._write(packet)
@@ -74,11 +70,36 @@ class Nollie16:
         while self._dev.read(p.REPORT_LEN, 1):
             pass
 
+
+class Nollie16:
+    """High-level operations on one Nollie, over any transport (direct USB, or the daemon)."""
+
+    def __init__(self, path: bytes | None = None, transport=None):
+        self.transport = transport or HidTransport(path)
+
+    def close(self) -> None:
+        self.transport.close()
+
+    def __enter__(self) -> "Nollie16":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # --- transport ----------------------------------------------------------------------------
+
+    def send(self, packet: bytes) -> None:
+        self.transport.send_many([packet])
+
+    def query(self, packet: bytes, timeout_ms: int = READ_TIMEOUT_MS) -> bytes:
+        """Send a GET and return its 1024-byte reply."""
+        return self.transport.query(packet, timeout_ms)
+
     # --- identity & status --------------------------------------------------------------------
 
     @property
     def serial(self) -> str:
-        return self._dev.get_serial_number_string()
+        return self.transport.serial
 
     def version(self) -> tuple[int, int]:
         return p.parse_version(self.query(p.get_config(ConfigItem.VERSION)))
@@ -240,7 +261,4 @@ class Nollie16:
 
     def send_frame(self, frame: Mapping[int, Sequence[RGB]]) -> None:
         """Stream one frame: fw channel -> LED colors. Channels left out are not updated."""
-        with self._lock:
-            for ch, colors in frame.items():
-                self._write(p.live_channel(ch, colors))
-            self._write(p.show())
+        self.transport.send_many([p.live_channel(ch, colors) for ch, colors in frame.items()] + [p.show()])

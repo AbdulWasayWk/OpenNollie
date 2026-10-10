@@ -169,7 +169,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
       (all static/hw → canvases; otherwise FSEQ + boot loop). CLI: `live`, `save`, `render`, `play`, `stop`, `effects`
 - [x] Verified on hardware: `live profiles/airflow-rainbow.toml` (user confirmed), `save` same profile (3.9 s,
       plays from the device, boot playlist FSEQ loop)
-- [ ] Daemon (systemd user service) owning the device + local API for CLI/GUI; profile switching
+- [x] Daemon (`opennollie/daemon.py`): owns the device (auto-reconnect), forwards raw packets for clients
+      (`client.connect()` → daemon if running else USB), hosts live effects (`live PROFILE` / `--stop` / `--status`),
+      pauses them while a client drives LEDs, autostart via `~/.config/opennollie/daemon.toml: live_profile`.
+      Verified: CLI via daemon, live in daemon, pause/resume, controller reboot → reconnect, clean SIGTERM.
+- [ ] systemd user unit + install script (needs the user's OK)
 - [ ] Backup/restore of the device config (JSON)
 
 ### Phase 5: GUI (PySide6)
@@ -184,6 +188,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: Power draw with the 60 % rainbow FSEQ: 3.43 A @ 4.95 V (vs 0.75 A for 40 % static colors). Worth showing in
+  the GUI; consider a brightness cap. Gotcha: `pgrep -f` also matches the Bash tool's zsh wrapper, so signal the
+  python pid. (source: hardware)
 - 2026-10-11: **GPU on port 9 is not 1:1.** A 12-color per-LED pattern showed as 8 blended colors from only the first few
   inputs. `ledtest` N=6 (1–5 green, 6 blue, 7 red) showed ~80 % green + 20 % blue and no red, so the GPU reads 6 values and
   interpolates them over its own LEDs. Per-port colors are exact; per-LED effects are smoothed by the GPU. Stored
