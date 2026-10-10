@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenNollie: Nollie 16CH RGB controller daemon
+Documentation=file://@REPO@/CLAUDE.md
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=@REPO@
+ExecStart=/usr/bin/python3 -m opennollie.daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
