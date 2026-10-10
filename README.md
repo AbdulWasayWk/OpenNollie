@@ -28,22 +28,56 @@ Open-source Linux app for the **Nollie 16CH** RGB controller: per-port colors, c
 
 ## Install
 
-**Arch / CachyOS, system-wide:**
+**Arch / CachyOS, system-wide** (recommended; `makepkg -si` installs the dependencies, builds the latest version
+from GitHub and installs the app, the service, the device access rule, the app-menu entry and the tray at login):
 
 ```bash
-cd packaging && makepkg -si
+sudo pacman -S --needed git base-devel
+git clone https://github.com/AbdulWasayWk/OpenNollie.git
+cd OpenNollie/packaging && makepkg -si
 systemctl --user enable --now opennollie
 ```
 
-**From a checkout, for your user only** (no root; puts `opennollie`, `opennollie-gui` and `opennollie-tray` in
-`~/.local/bin`, adds the app-menu entry, the tray at login and the service):
+**For your user only, from a checkout** (no package; puts `opennollie`, `opennollie-gui` and `opennollie-tray` in
+`~/.local/bin`, adds the app-menu entry, the tray at login and the service, all running the code in the checkout):
 
 ```bash
-sudo pacman -S --needed python-hidapi pyside6
-tools/install-user.sh            # undo with: tools/install-user.sh --remove
+sudo pacman -S --needed git python-hidapi pyside6
+git clone https://github.com/AbdulWasayWk/OpenNollie.git
+cd OpenNollie && tools/install-user.sh
 ```
 
-Use one of the two, not both.
+Use one of the two, not both (to switch from the user install to the package, run `tools/install-user.sh --remove`
+first). Then open **OpenNollie** from the app menu; the tray icon starts at your next login (or run
+`opennollie-tray`).
+
+**Updating:** package: run `makepkg -si` again in `OpenNollie/packaging`. User install: `git pull` in the checkout.
+Then restart the service: `systemctl --user restart opennollie`.
+
+## Uninstall
+
+The controller keeps its saved lighting either way and runs it without the app.
+
+**Package:**
+
+```bash
+systemctl --user disable --now opennollie
+pkill -f opennollie.gui.tray
+sudo pacman -Rns opennollie-git
+```
+
+If you switched the tray at login on or off on the *Settings* page, also delete
+`~/.config/autostart/opennollie-tray.desktop`.
+
+**User install** (from the checkout; then you can delete the `OpenNollie` folder):
+
+```bash
+tools/install-user.sh --remove
+```
+
+**Your settings stay** so a reinstall picks them up. To remove them too (this deletes your profiles, case layout
+and color balance): `~/.config/opennollie/` and `~/.local/state/opennollie/`. Effects, port names, LED counts and the
+stored animation live on the controller; to wipe those, run *Factory reset* on the *Device* page before uninstalling.
 
 ## Using it
 
