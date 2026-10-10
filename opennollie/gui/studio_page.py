@@ -1,5 +1,6 @@
 """Effects studio: build profiles from layers, preview them, run them live or store them on the device."""
 
+import json
 import threading
 import time
 from dataclasses import replace
@@ -19,6 +20,9 @@ from .caseview import CaseView
 from .common import ColorButton, Device, PortPicker, error, hbox, hexcolor
 
 from ..profile import EXAMPLE_PROFILES, USER_PROFILES
+
+SESSION_FILE = Path.home() / ".local" / "state" / "opennollie" / "studio.toml"
+SESSION_META = SESSION_FILE.with_suffix(".json")
 
 # Quick port selections for this machine (see CLAUDE.md); order = travel order.
 QUICK_GROUPS = {
@@ -335,6 +339,10 @@ class StudioPage(QWidget):
         self._live_restart.setSingleShot(True)
         self._live_restart.setInterval(400)
         self._live_restart.timeout.connect(self._live_update)
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(1000)
+        self._autosave_timer.timeout.connect(self.autosave)
 
         outer = QVBoxLayout(self)
         top = QHBoxLayout()
@@ -403,7 +411,7 @@ class StudioPage(QWidget):
         self.anim = QTimer(self)
         self.anim.setInterval(33)
         self.anim.timeout.connect(self._tick)
-        self._load_profile(self.prof)
+        self._restore_session()
 
     # --- profile <-> UI -----------------------------------------------------------------------
 
@@ -460,7 +468,7 @@ class StudioPage(QWidget):
         if 0 <= row and 0 <= j < len(self.prof.layers):
             L = self.prof.layers
             L[row], L[j] = L[j], L[row]
-            self._load_profile(self.prof)
+            self._restore_session()
             self.layers.setCurrentRow(j)
 
     def current_profile(self) -> Profile:
@@ -470,7 +478,31 @@ class StudioPage(QWidget):
 
     # --- preview ------------------------------------------------------------------------------
 
+    # --- session: reopen what was being edited --------------------------------------------------
+
+    def _restore_session(self) -> None:
+        """Reopen the profile from the last session (autosaved), else start a new one."""
+        try:
+            meta = json.loads(SESSION_META.read_text())
+            prof = profile.load(SESSION_FILE)
+            path = Path(meta["path"]) if meta.get("path") else None
+        except (OSError, ValueError, KeyError):
+            prof, path = Profile(name="New profile", layers=[new_layer()]), None
+        self.path = path if path and path.exists() else None
+        self._load_profile(prof)
+
+    def autosave(self) -> None:
+        """Keep the edited profile so the app reopens it next time (called ~1 s after each change)."""
+        self._autosave_timer.stop()
+        try:
+            SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            profile.save(self.prof, SESSION_FILE)
+            SESSION_META.write_text(json.dumps({"path": str(self.path) if self.path else None}))
+        except (OSError, ValueError):
+            pass
+
     def _rebuild(self) -> None:
+        self._autosave_timer.start()
         prof = self.current_profile()
         try:
             self._renderer = engine.Renderer(prof) if prof.layers else None
@@ -543,6 +575,7 @@ class StudioPage(QWidget):
         self.device.run(lambda d: threading.Thread(target=run, daemon=True).start())
 
     def _save_to_device(self) -> None:
+        self.autosave()
         prof = self.current_profile()
         if not prof.layers:
             return error(self, "Save to device", "Pick some ports first.")

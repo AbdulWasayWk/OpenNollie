@@ -1,6 +1,6 @@
 """Ports & LEDs page: names, LED counts, identify, LED-count test."""
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QPushButton, QSpinBox, QTableWidget, QVBoxLayout,
                                QWidget)
@@ -13,14 +13,18 @@ from .common import Device, error, hbox
 RGB = tuple[int, int, int]
 
 
-class LiveSession:
+class LiveSession(QObject):
     """Drive LEDs from the GUI: pauses the daemon's live effect meanwhile, re-sends the frame so the
-    device doesn't fall back (it does ~3 s after the last frame)."""
+    device doesn't fall back (it does ~3 s after the last frame).
 
-    def __init__(self, device: Device, interval_ms: int = 1000):
+    A QObject with a Qt parent so it (and its timer) lives as long as the widget using it; a parentless
+    timer whose Python owner got garbage-collected crashed the app (Identify)."""
+
+    def __init__(self, device: Device, interval_ms: int = 1000, parent: QObject | None = None):
+        super().__init__(parent)
         self.device = device
         self.frame: dict[int, list[RGB]] = {}
-        self.timer = QTimer()
+        self.timer = QTimer(self)
         self.timer.setInterval(interval_ms)
         self.timer.timeout.connect(self._send)
         self._paused_daemon = False
@@ -61,7 +65,7 @@ class LedTestDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"LED test: port {port}")
         self.port = port
-        self.live = LiveSession(device, 120)
+        self.live = LiveSession(device, 120, self)
         self.step = 0
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel(
@@ -130,7 +134,7 @@ class LedOrderDialog(QDialog):
         self.setWindowTitle(f"LED order: port {port}")
         self.device, self.port = device, port
         self.layout_ = layouts.strip(max(1, leds), zleds)
-        self.live = LiveSession(device, 150)
+        self.live = LiveSession(device, 150, self)
         self.step = 0
         self.anim = QTimer(self)
         self.anim.setInterval(150)
@@ -334,11 +338,11 @@ class PortsPage(QWidget):
                         lambda e: error(self, "Ports", e))
 
     def _identify(self, port: int) -> None:
-        session = LiveSession(self.device)
+        session = LiveSession(self.device, parent=self)
         session.start()
         n = max(1, self.counts[port].value())
         session.show({port: [(255, 255, 255)] * n})
-        QTimer.singleShot(3000, session.stop)
+        QTimer.singleShot(3000, lambda: (session.stop(), QTimer.singleShot(1000, session.deleteLater)))
         self.device.status.emit(f"Port {port} is lit white for 3 s")
 
     def _order(self, port: int) -> None:

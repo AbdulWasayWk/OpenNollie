@@ -50,6 +50,7 @@ class MainWindow(QMainWindow):
         self.ports.refresh()          # loads names + LED counts the other pages use
 
     def closeEvent(self, e):
+        self.studio.autosave()
         self.device.shutdown()
         super().closeEvent(e)
 
