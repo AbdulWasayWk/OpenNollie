@@ -530,7 +530,9 @@ class StudioPage(QWidget):
         self._autosave_timer.start()
         prof = self.current_profile()
         try:
-            self._renderer = engine.Renderer(prof) if prof.layers else None
+            # The preview shows what you'll see: the intended colors. Color balance only changes what is sent
+            # to a device so that it *looks* like this, so it's left out here.
+            self._renderer = engine.Renderer(replace(prof, port_gains={})) if prof.layers else None
             n, _ = engine.loop_frames(prof) if prof.layers else (0, [])
             how = ("stored as built-in Solid canvases" if prof.is_static else
                    f"stored as a {n / prof.fps:.1f} s seamless animation")
