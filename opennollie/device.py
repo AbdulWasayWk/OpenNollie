@@ -2,6 +2,7 @@
 
 import threading
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
 import hid
 
@@ -165,6 +166,18 @@ class Nollie16:
     def set_canvas_params(self, canvas: int, params: CanvasParams) -> None:
         self.send(params.encode(canvas))
 
+    def set_canvases(self, layout: CanvasLayout, params: Sequence[CanvasParams], boot: bool = False) -> None:
+        """Replace all loop (or boot) canvases. Same order as the app: params, channel map, count."""
+        limit = p.BOOT_CANVAS_MAX if boot else p.LOOP_CANVAS_MAX
+        if len(layout.canvases) != len(params) or len(params) > limit:
+            raise ValueError(f"need one params entry per canvas, at most {limit} canvases")
+        base = p.BOOT_CANVAS_BASE if boot else 0
+        for i, (chans, prm) in enumerate(zip(layout.canvases, params)):
+            self.send(replace(prm, ch_count=len(chans)).encode(base + i))
+        self.send(p.set_canvas_map(layout.flat(), boot))
+        item = EffectItem.START_CANVAS_LEN if boot else EffectItem.CANVAS_LEN
+        self.send(p.set_effect(item, len(params)))
+
     def set_led_counts(self, counts: Sequence[int]) -> None:
         self.send(p.set_led_num(counts))
 
@@ -173,6 +186,53 @@ class Nollie16:
 
     def set_ol_idle(self, seconds: int) -> None:
         self.send(p.set_ol_idle(seconds))
+
+    def set_frame_ms(self, ms: int, boot: bool = False) -> None:
+        self.send(p.set_effect(EffectItem.START_FPS if boot else EffectItem.FPS, ms))
+
+    def set_zled_counts(self, counts: Sequence[int]) -> None:
+        self.send(p.set_effect(EffectItem.ZLED_NUM, p.u16le(counts)))
+
+    def set_dynamic(self, which: int, values: Sequence[int]) -> None:
+        item = EffectItem.DYNAMIC_1 if which == 1 else EffectItem.DYNAMIC_2
+        self.send(p.set_effect(item, list(values)[:16]))
+
+    def set_frame_delay(self, values: Sequence[int]) -> None:
+        self.send(p.set_effect(EffectItem.FRAME_DELAY, list(values)[:16]))
+
+    def set_boot_playlist(self, intro: int, steady: int) -> None:
+        self.send(p.set_effect(EffectItem.BOOT_PLAYLIST, intro, steady))
+
+    def set_name(self, text: str) -> None:
+        data = p.utf16le(text)
+        count = p.parse_u32le(self.query(p.get_core(CoreItem.NAME_COUNT)))
+        self.send(p.set_core(CoreItem.NAME_COUNT, p.u32le(count + 1)))
+        self.send(p.set_core(CoreItem.NAME_LEN, p.u32le(len(data))))
+        self.send(p.set_core(CoreItem.NAME, data))
+
+    def set_vmap_name(self, ch: int, text: str) -> None:
+        self.send(p.set_vmap_name(ch, text))
+
+    def set_led_index(self, ch: int, order: Sequence[int]) -> None:
+        """LED order remap for one channel (app: "vmap"); entries are LED indices < 256."""
+        if not order or max(order) >= p.LEDS_PER_CHANNEL:
+            raise ValueError("LED index entries must be 0..255")
+        addr, data = ch * p.LEDS_PER_CHANNEL, list(order)
+        while data:
+            chunk, data = data[: p.LED_INDEX_CHUNK], data[p.LED_INDEX_CHUNK :]
+            self.send(p.set_led_index(addr, chunk))
+            addr += len(chunk)
+
+    def play_boot_canvas(self) -> None:
+        """Preview the boot canvases now (app: "play")."""
+        self.send(p.set_effect(EffectItem.INIT_START))
+
+    def factory_reset(self) -> None:
+        """Reset canvas and lighting settings; hardware calibration is kept. The device may reboot."""
+        self.send(p.set_effect(EffectItem.RESTORE))
+
+    def reboot(self) -> None:
+        self.send(p.set_effect(EffectItem.SOFT_RESET))
 
     # --- live streaming -----------------------------------------------------------------------
 

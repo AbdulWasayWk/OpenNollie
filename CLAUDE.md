@@ -37,6 +37,9 @@ An open-source Linux app for the **Nollie 16CH RGB** controller (now on firmware
 "Port N" = OpenRGB's / NollieRGB app's "Channel N" = our CLI's port N. `fw ch` = channel index on the wire for
 fw 2.3.0 (app `N_DEV_CH_NAME['Nollie16']`). Devices verified 2026-10-10 with `identify` on the legacy fw.
 
+Port → fw ch mapping **re-verified on fw 2.3.0** (2026-10-11): `static 4,5 red 6-8 green 9 white 12,13 purple 14-16 cyan`
+showed every group correctly.
+
 | Port | fw ch | Device |
 |------|-------|--------|
 | 1  | 3  | — (not connected) |
@@ -64,8 +67,8 @@ Used ports: `4-9,12-16`. Real LED counts per device are unknown; the firmware ha
 Full detail: `docs/PROTOCOL.md`. Every command is a 1024 B output report; GETs answer with a 1024 B input
 report (data starts at byte 0). All multi-byte values are **little-endian**.
 
-- **Settings persist automatically.** Every SET is stored on the device (`WRITE_COUNT` counts flash
-  programs). The new firmware has **no separate "save" step**; the app pushes each change immediately.
+- **Settings persist automatically.** Every SET is stored on the device. The firmware flushes to flash a few
+  seconds after a change (`WRITE_COUNT` goes up). The new firmware has **no separate "save" step**; the app pushes each change immediately.
 - **Mode** (`FA 01 m`): 0 = OL (host streams frames), 1 = HW (built-in effects, default), 2 = SL, 3 = FSEQ.
 - **Canvases**: groups of channels that share one effect. Loop canvases are 0..13 (`CANVAS_LEN`, map `FA 03`);
   start/boot canvases are 14+ (`START_CANVAS_LEN`, map `FA 0B`). Each canvas has `CH_PARAM` (`FA 02 canvas …`):
@@ -76,8 +79,10 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 - **Global**: FPS as frame ms (`FA 06`/`FA 07` start), palettes 8×16 GRB (`FA 0D`), dynamic 1/2, frame delay,
   boot playlist (intro, steady) (`FA 13`), idle fallback seconds after streaming stops (`F6 16`), controller
   name (`F6 06`), timestamps.
-- **Live**: per channel `[ch, 0, 0, 0, GRB × 256]`, then `FF` = show. Streaming overrides the HW effect. Revert with
-  `FA 01 01` or let the idle timer do it.
+- **Live**: per channel `[ch, 0, 0, 0, GRB × 256]`, then `FF` = show. The first frame switches the mode to ONLINE
+  automatically. With idle = 0 (default) the device **falls back to HW effects 3.0 s after the last frame**, so live
+  output needs continuous streaming (or idle 5 s…1 h / 65535 = never). Revert manually with `FA 01 01`.
+- **Static per-port colors** = HW mode with one `Solid` canvas per color (stored, no streaming).
 - **Stored animations**: FSEQ v2 (uncompressed) in SPI flash (16 MB GD25Q128, region from `0x10000`), uploaded via
   `F4` flash ops; played with `F3 02` or as the boot "steady" item.
 - **Maintenance**: factory reset `FA 21` (keeps calibration), super reset `FA 22`, soft reboot `FA 23`,
@@ -144,11 +149,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ### Phase 3: Protocol library (fw 2.3.0)
 - [ ] `docs/PROTOCOL.md`: rewrite for fw 2.3.0 (all commands, payloads, responses, sequences from capture)
-- [ ] `protocol.py` + `device.py`: request/response, all GET/SET except OTA; unit tests vs captured bytes
-- [ ] `model.py`: read full device config (`opennollie info` / `dump`); verify on hardware (read-only)
-- [ ] Writes, one feature at a time, each verified on hardware: mode, canvas params, canvas maps, LED counts,
-      palettes, FPS, boot playlist, idle timeout, name, vmap
-- [ ] Live streaming (OL) + identify
+- [x] `protocol.py` + `device.py`: request/response, GET/SET except OTA; unit tests vs captured bytes
+- [x] `model.py`: read full device config (`opennollie info` / `dump` / `power`), verified on hardware
+- [x] Writes verified on hardware: canvas params (readback + visual), loop canvas layout via `static`, mode
+- [~] Setters implemented, not yet hardware-verified: LED counts, palettes, FPS, boot playlist, idle, name,
+      vmap/LED index, vmap name, dynamic, frame delay, boot canvases, factory reset, reboot
+- [~] Live streaming (OL) + identify: single frames verified; needs a keep-alive loop (3 s fallback)
 - [ ] LED-count auto-detection, voltage/power, device info
 - [ ] Flash ops + FSEQ upload/play (read the app's flash code fully first; verify with CRC)
 - [ ] Backup/restore JSON (compatible with the app's export format if practical), factory reset, reboot
@@ -172,6 +178,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: **Stored per-port colors work** (`static`): 5 Solid canvases, readback exact, user confirmed every
+  group's color, so the port map is right on fw 2.3.0. Canvas-params write: readback exact; WRITE_COUNT 25→26 a few
+  seconds later (lazy flash flush). Live: one frame → mode ONLINE, back to HARDWARE after 3.0 s (idle=0 default).
+  Power reading: 5.13 V, 0.75 A, MCU 41 °C. Name kept through factory reset: "Wasay_PC_Nollie16". (source: hardware)
 - 2026-10-10: **fw 2.3.0 verified from Linux (read-only)**: `FC 01` → ver 19 / hw 165, `FC 02` → 2.3.0, mode 1 (HW),
   1 canvas × 16 ch running effect 2 (Breath), LED num 256 per channel, idle 0, boot playlist 0/0, which are the
   factory defaults after the user's reset. if1 is a HID keyboard. (source: hidapi on host)

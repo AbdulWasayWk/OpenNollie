@@ -103,6 +103,19 @@ class Mode(IntEnum):
     FSEQ = 3        # play the stored animation
 
 
+class BootIntro(IntEnum):     # boot playlist, first item (played once at power-on)
+    START_CANVAS = 0
+    NONE = 1
+    FSEQ_ONCE = 2
+
+
+class BootSteady(IntEnum):    # boot playlist, second item (runs after the intro)
+    HW_EFFECTS = 0
+    FSEQ_LOOP = 1
+
+
+IDLE_NEVER = 0xFFFF         # OL idle timeout value meaning "never fall back"; 0 = firmware default (~3 s)
+
 # Effect index == firmware fx_mode value; order is fixed by the firmware.
 EFFECTS = (
     "Off", "Solid", "Breath", "Scanning", "Rainbow", "Rainbow cycle", "Meteor", "Shake",

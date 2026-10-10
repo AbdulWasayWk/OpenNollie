@@ -8,7 +8,7 @@ import time
 from . import protocol as p
 from .device import DeviceNotFound, NoResponse, Nollie16
 from .model import DeviceState
-from .protocol import Mode, RGB
+from .protocol import CanvasLayout, CanvasParams, Mode, RGB
 
 NAMED_COLORS = {
     "off": (0, 0, 0), "black": (0, 0, 0), "white": (255, 255, 255),
@@ -134,6 +134,27 @@ def cmd_identify(dev: Nollie16, args) -> None:
     dev.send_frame(live_frame({}, args.leds))
 
 
+def cmd_static(dev: Nollie16, args) -> None:
+    """Stored per-port solid colors: ports sharing a color share one Solid canvas."""
+    if len(args.assignments) % 2:
+        sys.exit("usage: static PORTS COLOR [PORTS COLOR ...]")
+    port_color: dict[int, RGB] = {}
+    for ports_s, color_s in zip(args.assignments[::2], args.assignments[1::2]):
+        color = parse_color(color_s)
+        port_color.update({port: color for port in parse_ports(ports_s)})
+    groups: dict[RGB, list[int]] = {}
+    for port, color in port_color.items():
+        groups.setdefault(color, []).append(p.PORT_TO_CH[port - 1])
+    if len(groups) > p.LOOP_CANVAS_MAX:
+        sys.exit(f"at most {p.LOOP_CANVAS_MAX} different colors (one canvas each)")
+    solid = p.EFFECTS.index("Solid")
+    dev.set_canvases(
+        CanvasLayout(list(groups.values())),
+        [CanvasParams(effect=solid, brightness=args.brightness, color1=c) for c in groups],
+    )
+    dev.set_mode(Mode.HARDWARE)
+
+
 def cmd_mode(dev: Nollie16, args) -> None:
     if args.mode is None:
         print(dev.mode().name.lower())
@@ -163,6 +184,11 @@ def main(argv=None) -> None:
     sp.add_argument("ports", nargs="?", default="all")
     sp.add_argument("--delay", type=float, help="seconds per port (default: wait for Enter)")
     sp.set_defaults(func=cmd_identify)
+
+    sp = sub.add_parser("static", help="stored: solid colors per port, kept on the device (unlisted ports: no canvas)",
+                        description="e.g.  static 4,5 red 6-8 00ff00 9 white   (uses --brightness)")
+    sp.add_argument("assignments", nargs="+", metavar="PORTS COLOR")
+    sp.set_defaults(func=cmd_static)
 
     sp = sub.add_parser("mode", help="show or set the mode (hardware = built-in effects)")
     sp.add_argument("mode", nargs="?", choices=[m.name.lower() for m in Mode])
