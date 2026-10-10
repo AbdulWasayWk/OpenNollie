@@ -1,0 +1,10 @@
+post_install() {
+  echo ">>> OpenNollie: start the daemon for your user (once):"
+  echo ">>>     systemctl --user enable --now opennollie"
+  echo ">>> The tray icon starts at your next login (or run: opennollie-tray)."
+  echo ">>> If you used tools/install-user.sh before, run 'tools/install-user.sh --remove' first."
+}
+
+post_upgrade() {
+  echo ">>> OpenNollie: restart the daemon to use the new version: systemctl --user restart opennollie"
+}

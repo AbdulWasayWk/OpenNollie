@@ -1,0 +1,41 @@
+# Maintainer: AbdulWasayWk <https://github.com/AbdulWasayWk>
+pkgname=opennollie-git
+_repo=OpenNollie
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Linux app for the Nollie 16CH RGB controller: per-port colors, custom effects, save-to-device"
+arch=(any)
+url="https://github.com/AbdulWasayWk/OpenNollie"
+license=(GPL-3.0-or-later)
+depends=(python python-hidapi pyside6)
+makedepends=(git python-build python-installer python-setuptools python-wheel)
+provides=(opennollie)
+conflicts=(opennollie)
+install=opennollie.install
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_repo"
+  printf "0.1.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$_repo"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$_repo"
+  python -m unittest discover tests
+}
+
+package() {
+  cd "$_repo"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 packaging/70-opennollie.rules "$pkgdir/usr/lib/udev/rules.d/70-opennollie.rules"
+  install -Dm644 packaging/opennollie.service "$pkgdir/usr/lib/systemd/user/opennollie.service"
+  install -Dm644 packaging/opennollie.desktop "$pkgdir/usr/share/applications/opennollie.desktop"
+  install -Dm644 packaging/opennollie-tray.desktop "$pkgdir/etc/xdg/autostart/opennollie-tray.desktop"
+  install -Dm644 README.md docs/PROTOCOL.md -t "$pkgdir/usr/share/doc/$pkgname/"
+}
