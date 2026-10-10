@@ -8,7 +8,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
-                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QProgressDialog,
+                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QMessageBox,
+                               QProgressDialog,
                                QPushButton, QSlider, QSpinBox, QSplitter, QTableWidget, QToolButton, QVBoxLayout,
                                QWidget)
 
@@ -333,7 +334,9 @@ class StudioPage(QWidget):
         self.led_counts = led_counts          # callable -> {port: count} (from the Ports page)
         self.orders = orders                  # callable -> {port: LED order} (from the Ports page)
         self.prof = Profile(name="New profile", layers=[new_layer()])
-        self.path: Path | None = None
+        self.path: Path | None = None          # the user profile file this is saved as (None = not saved yet)
+        self.example: Path | None = None       # the example it was opened from (read-only)
+        self._dirty = False
         self._live_stop: threading.Event | None = None
         self._live_restart = QTimer(self)
         self._live_restart.setSingleShot(True)
@@ -351,11 +354,19 @@ class StudioPage(QWidget):
         self.fps.setRange(5, 60)
         self.fps.setValue(30)
         self.fps.setSuffix(" fps")
+        self.profiles = QComboBox()
+        self.profiles.setMinimumWidth(240)
+        self.profiles.setToolTip("Your saved profiles, then the examples")
+        self.profiles.activated.connect(self._profile_chosen)
         top.addWidget(QLabel("Profile"))
+        top.addWidget(self.profiles, 1)
+        top.addWidget(QLabel("Name"))
         top.addWidget(self.name, 1)
         top.addWidget(self.fps)
-        for text, slot in (("New", self._new), ("Open…", self._open), ("Save", self._save), ("Save as…", self._save_as)):
-            b = QPushButton(text)
+        self.delete_btn = QPushButton("Delete")
+        for text, slot, btn in (("New", self._new, None), ("Save", self._save, None), ("Save as…", self._save_as, None),
+                                ("Delete", self._delete, self.delete_btn), ("Open file…", self._open, None)):
+            b = btn or QPushButton(text)
             b.clicked.connect(slot)
             top.addWidget(b)
         outer.addLayout(top)
@@ -415,7 +426,7 @@ class StudioPage(QWidget):
 
     # --- profile <-> UI -----------------------------------------------------------------------
 
-    def _load_profile(self, prof: Profile) -> None:
+    def _load_profile(self, prof: Profile, dirty: bool = False) -> None:
         self.prof = prof
         self.name.setText(prof.name)
         self.fps.setValue(prof.fps)
@@ -425,7 +436,9 @@ class StudioPage(QWidget):
             self.layers.addItem(self._layer_title(l))
         self.layers.blockSignals(False)
         self.layers.setCurrentRow(0)
+        self._dirty = dirty
         self._rebuild()
+        self._refresh_profiles()
 
     def _layer_title(self, l: Layer) -> str:
         name = EFFECT_INFO[l.spec.kind].label
@@ -443,16 +456,19 @@ class StudioPage(QWidget):
         layer = self.editor.value()
         self.prof.layers[row] = layer
         self.layers.item(row).setText(self._layer_title(layer))
+        self._mark_dirty()
         self._rebuild()
 
     def _meta_edited(self, *_):
         self.prof = replace(self.prof, name=self.name.text().strip() or "Untitled", fps=self.fps.value())
+        self._mark_dirty()
         self._rebuild()
 
     def _add_layer(self) -> None:
         self.prof.layers.append(new_layer())
         self.layers.addItem(self._layer_title(self.prof.layers[-1]))
         self.layers.setCurrentRow(len(self.prof.layers) - 1)
+        self._mark_dirty()
         self._rebuild()
 
     def _remove_layer(self) -> None:
@@ -460,6 +476,7 @@ class StudioPage(QWidget):
         if row >= 0 and len(self.prof.layers) > 1:
             del self.prof.layers[row]
             self.layers.takeItem(row)
+            self._mark_dirty()
             self._rebuild()
 
     def _move(self, d: int) -> None:
@@ -468,7 +485,7 @@ class StudioPage(QWidget):
         if 0 <= row and 0 <= j < len(self.prof.layers):
             L = self.prof.layers
             L[row], L[j] = L[j], L[row]
-            self._restore_session()
+            self._load_profile(self.prof, dirty=True)
             self.layers.setCurrentRow(j)
 
     def current_profile(self) -> Profile:
@@ -486,10 +503,13 @@ class StudioPage(QWidget):
             meta = json.loads(SESSION_META.read_text())
             prof = profile.load(SESSION_FILE)
             path = Path(meta["path"]) if meta.get("path") else None
+            example = Path(meta["example"]) if meta.get("example") else None
+            dirty = bool(meta.get("dirty", path is None))
         except (OSError, ValueError, KeyError):
-            prof, path = Profile(name="New profile", layers=[new_layer()]), None
+            prof, path, example, dirty = Profile(name="New profile", layers=[new_layer()]), None, None, False
         self.path = path if path and path.exists() else None
-        self._load_profile(prof)
+        self.example = example if example and example.exists() else None
+        self._load_profile(prof, dirty=dirty)
 
     def autosave(self) -> None:
         """Keep the edited profile so the app reopens it next time (called ~1 s after each change)."""
@@ -497,7 +517,9 @@ class StudioPage(QWidget):
         try:
             SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
             profile.save(self.prof, SESSION_FILE)
-            SESSION_META.write_text(json.dumps({"path": str(self.path) if self.path else None}))
+            SESSION_META.write_text(json.dumps({"path": str(self.path) if self.path else None,
+                                                "example": str(self.example) if self.example else None,
+                                                "dirty": self._dirty}))
         except (OSError, ValueError):
             pass
 
@@ -602,33 +624,119 @@ class StudioPage(QWidget):
         self.dlg.close()
         self.device.status.emit(f"'{self.prof.name}' {msg}")
 
-    # --- files --------------------------------------------------------------------------------
+    # --- profiles ---------------------------------------------------------------------------
+
+    def _mark_dirty(self) -> None:
+        if not self._dirty:
+            self._dirty = True
+            self._refresh_profiles()
+
+    def _refresh_profiles(self) -> None:
+        """Fill the dropdown: unsaved work (if any), your profiles, then the examples."""
+        cb = self.profiles
+        cb.blockSignals(True)
+        cb.clear()
+        current = self.path or (self.example if not self._dirty else None)
+        if current is None:
+            origin = f", changed from example '{self._file_label(self.example)}'" if self.example else ""
+            cb.addItem(f"{self.prof.name} (not saved{origin})", None)
+        everything = profile.available()
+        for f in (f for f in everything if f.parent == USER_PROFILES):
+            cb.addItem(self._file_label(f) + (" (unsaved changes)" if f == self.path and self._dirty else ""), str(f))
+        examples = [f for f in everything if f.parent == EXAMPLE_PROFILES]
+        if examples:
+            cb.insertSeparator(cb.count())
+            for f in examples:
+                cb.addItem(f"{self._file_label(f)} (example)", str(f))
+        cb.setCurrentIndex(max(0, cb.findData(str(current))) if current else 0)
+        cb.blockSignals(False)
+        self.delete_btn.setEnabled(self.path is not None)
+
+    @staticmethod
+    def _file_label(path: Path) -> str:
+        try:
+            return profile.load(path).name
+        except Exception:
+            return path.stem
+
+    def _confirm_switch(self) -> bool:
+        """With unsaved changes, ask before replacing them. True = go ahead."""
+        if not self._dirty:
+            return True
+        box = QMessageBox(QMessageBox.Question, "Unsaved changes",
+                          f"Save the changes to '{self.prof.name}' first?", parent=self)
+        box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+        choice = box.exec()
+        if choice == QMessageBox.Save:
+            return self._save()
+        return choice == QMessageBox.Discard
+
+    def _profile_chosen(self, index: int) -> None:
+        data = self.profiles.itemData(index)
+        if data is None or Path(data) in (self.path, None if self._dirty else self.example):
+            return self._refresh_profiles()
+        if not self._confirm_switch():
+            return self._refresh_profiles()
+        path = Path(data)
+        try:
+            prof = profile.load(path)
+        except Exception as e:
+            self._refresh_profiles()
+            return error(self, "Open profile", e)
+        self.path, self.example = (path, None) if path.parent == USER_PROFILES else (None, path)
+        self._load_profile(prof)
+        self.autosave()
 
     def _new(self) -> None:
-        self.path = None
-        self._load_profile(Profile(name="New profile", layers=[new_layer()]))
+        if self._confirm_switch():
+            self.path = self.example = None
+            self._load_profile(Profile(name="New profile", layers=[new_layer()]), dirty=True)
 
     def _open(self) -> None:
-        USER_PROFILES.mkdir(parents=True, exist_ok=True)
-        start = str(USER_PROFILES if any(USER_PROFILES.glob("*.toml")) else EXAMPLE_PROFILES)
-        path, _ = QFileDialog.getOpenFileName(self, "Open profile", start, "Profiles (*.toml)")
+        """Open a profile file from anywhere (e.g. one somebody shared)."""
+        if not self._confirm_switch():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Open profile file", str(Path.home()), "Profiles (*.toml)")
         if path:
             try:
-                self._load_profile(profile.load(path))
-                self.path = Path(path) if Path(path).parent != EXAMPLE_PROFILES else None
+                prof = profile.load(path)
             except Exception as e:
-                error(self, "Open profile", e)
+                return error(self, "Open profile", e)
+            self.path, self.example = None, None
+            self._load_profile(prof, dirty=True)        # not in your profiles yet: Save puts it there
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
         if not self.path:
             return self._save_as()
         profile.save(self.prof, self.path)
-        self.device.status.emit(f"Saved {self.path}")
+        self._dirty = False
+        self._refresh_profiles()
+        self.autosave()
+        self.device.status.emit(f"Saved '{self.prof.name}'")
+        return True
 
-    def _save_as(self) -> None:
+    def _save_as(self) -> bool:
+        name, ok = QInputDialog.getText(self, "Save profile", "Profile name:", text=self.prof.name)
+        name = name.strip()
+        if not ok or not name:
+            return False
+        slug = "".join(c if c.isalnum() else "-" for c in name.lower()).strip("-") or "profile"
+        path = USER_PROFILES / f"{slug}.toml"
+        if path.exists() and path != self.path and QMessageBox.question(
+                self, "Save profile", f"A profile file '{path.name}' already exists. Replace it?") != QMessageBox.Yes:
+            return False
         USER_PROFILES.mkdir(parents=True, exist_ok=True)
-        default = USER_PROFILES / (self.prof.name.lower().replace(" ", "-") + ".toml")
-        path, _ = QFileDialog.getSaveFileName(self, "Save profile", str(default), "Profiles (*.toml)")
-        if path:
-            self.path = Path(path)
-            self._save()
+        self.prof = replace(self.prof, name=name)
+        self.name.setText(name)
+        self.path, self.example = path, None
+        return self._save()
+
+    def _delete(self) -> None:
+        if not self.path or QMessageBox.question(
+                self, "Delete profile", f"Delete '{self.prof.name}' from your profiles?") != QMessageBox.Yes:
+            return
+        self.path.unlink(missing_ok=True)
+        self.path, self.example = None, None
+        self._dirty = True                      # what's on screen is now unsaved
+        self._refresh_profiles()
+        self.autosave()

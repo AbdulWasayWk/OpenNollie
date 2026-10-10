@@ -224,6 +224,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
       Device (name, power, startup playlist, idle fallback, backup JSON, restart, factory reset)
 - [x] Offscreen screenshot check of every page; every effect exercised in the editor without errors
 - [x] User test on the real desktop (basic functionality OK)
+- [x] Studio: profile dropdown (your profiles + examples), Save as by name into ~/.config/opennollie/profiles, Delete,
+      Save/Discard/Cancel on unsaved changes, examples read-only; autosave + reopen last session (user requests)
 - [ ] Restore from backup JSON; LED-order (vmap) editor + component presets; tray icon / quick profile switch
 
 ### Phase 6: Packaging
