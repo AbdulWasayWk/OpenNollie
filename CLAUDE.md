@@ -238,6 +238,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: **GPU color balance differs**: same data, same timing, but its blue is weaker (cyan → greener, purple →
+  pinker, white → yellowish), so a rainbow looks "ahead" on the GPU. Fixed with per-port color balance
+  (`calibration.py`, `~/.config/opennollie/calibration.toml`; GUI Ports & LEDs → Color balance; CLI `balance`),
+  applied in Renderer and static canvases via `engine.prepare()`. (source: user step test)
+- 2026-10-11: Regression found: `opennollie save` / foreground `live --duration` were broken since d44a293 (a text
+  replacement deleted `cli.load_profile`). Unit tests never ran CLI commands. Added `tests/fakedevice.py` (simulated
+  controller incl. flash + CRC) and `tests/test_offline_device.py` (CLI + save + balance + backup end to end).
 - 2026-10-11: Identify crashed the GUI (segfault): a parentless QTimer owned by a garbage-collected Python object.
   Qt objects that outlive a function call need a Qt parent. (source: offscreen repro with faulthandler)
 - 2026-10-11: **Mode SL = LEDs paused (dark) while the flash is busy.** Triggered by the STOP command (`F3 03`) and by

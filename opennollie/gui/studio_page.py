@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QPushButton, QSlider, QSpinBox, QSplitter, QTableWidget, QToolButton, QVBoxLayout,
                                QWidget)
 
-from .. import engine, profile
+from .. import calibration, engine, profile
 from .. import protocol as p
 from ..effects import EFFECT_INFO, EffectSpec, parse_color
 from ..profile import Layer, Profile
@@ -491,7 +491,7 @@ class StudioPage(QWidget):
     def current_profile(self) -> Profile:
         """The edited profile with LED counts from the controller (unless the profile sets its own)."""
         prof = replace(self.prof, layers=[l for l in self.prof.layers if l.ports])
-        return prof.with_device_leds(self.led_counts(), self.orders())
+        return prof.with_device_leds(self.led_counts(), self.orders()).with_calibration(calibration.load())
 
     # --- preview ------------------------------------------------------------------------------
 

@@ -138,7 +138,7 @@ class LiveRunner:
                 stop.wait(0.1)
                 continue
             try:
-                resolved = prof.with_device_leds(*layouts.read_ports(self.dev))
+                resolved = engine.prepare(self.dev, prof)
                 pause_or_stop = threading.Event()
                 watcher = threading.Thread(target=self._watch, args=(stop, pause_or_stop), daemon=True)
                 watcher.start()

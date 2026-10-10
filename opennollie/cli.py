@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from . import client, engine, fseq, layouts, model, profile
+from . import calibration, client, engine, fseq, layouts, model, profile
 from . import protocol as p
 from .device import DeviceNotFound, NoResponse, Nollie16
 from .flash import Flash
@@ -325,6 +325,27 @@ def cmd_ledtest(dev: Nollie16, args) -> None:
         print(f"port {port}: {n} LEDs stored")
 
 
+def cmd_balance(args) -> None:
+    """Show or set a port's color balance (red/green/blue levels in %), kept on this PC."""
+    gains = calibration.load()
+    if args.port is not None:
+        if args.reset:
+            gains.pop(args.port, None)
+        elif len(args.levels) == 3:
+            if any(not 0 <= x <= 100 for x in args.levels):
+                sys.exit("levels are percentages, 0-100")
+            gains[args.port] = tuple(x / 100 for x in args.levels)
+        elif args.levels:
+            sys.exit("give three levels: RED GREEN BLUE (in %), e.g.  balance 9 75 80 100")
+        calibration.save(gains)
+    if not gains:
+        print("no color balance set (all ports at 100/100/100)")
+    for port, g in sorted(gains.items()):
+        print(f"port {port:2d}: red {g[0]:.0%}  green {g[1]:.0%}  blue {g[2]:.0%}")
+    if args.port is not None:
+        print("applies to effects you start or save from now on")
+
+
 def cmd_static(dev: Nollie16, args) -> None:
     """Stored per-port solid colors: ports sharing a color share one Solid canvas."""
     if len(args.assignments) % 2:
@@ -359,6 +380,10 @@ def _progress(phase: str, done: int, total: int) -> None:
         print(("" if _last_progress[0] is None else "\n") + f"  {phase}", end="")
     _last_progress[:] = [phase, pct]
     print(f" {pct}%", end="", flush=True)
+
+
+def load_profile(dev: Nollie16, name: str) -> profile.Profile:
+    return engine.prepare(dev, profile.load(name))
 
 
 def cmd_live(dev: Nollie16, args) -> None:
@@ -520,6 +545,12 @@ def main(argv=None) -> None:
     sp.add_argument("profile")
     sp.add_argument("-o", "--output", required=True)
     sp.set_defaults(func=cmd_render, offline=True)
+    sp = sub.add_parser("balance", help="color balance per port (red/green/blue %%), e.g. to match a GPU to the fans",
+                        description="e.g.  balance   |   balance 9 75 80 100   |   balance 9 --reset")
+    sp.add_argument("port", type=int, nargs="?", choices=range(1, p.NUM_CHANNELS + 1), metavar="PORT")
+    sp.add_argument("levels", type=int, nargs="*", metavar="R G B")
+    sp.add_argument("--reset", action="store_true")
+    sp.set_defaults(func=cmd_balance, offline=True)
     sp = sub.add_parser("profiles", help="list your profiles and the examples")
     sp.set_defaults(func=lambda args: print("\n".join(
         f"{f.stem:<22} {f.parent}" for f in profile.available())), offline=True)

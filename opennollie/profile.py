@@ -58,6 +58,8 @@ class Profile:
     layers: list[Layer] = field(default_factory=list)
     # Per port: logical -> physical LED order (lit LEDs, then dark ones), from the device. Not saved in profiles.
     port_orders: dict[int, list[int]] = field(default_factory=dict)
+    # Per port: red/green/blue levels (calibration.py), applied when rendering. Not saved in profiles.
+    port_gains: dict[int, tuple[float, float, float]] = field(default_factory=dict)
 
     def leds_for(self, port: int) -> int:
         return self.port_leds.get(port, self.leds or 32)
@@ -80,6 +82,9 @@ class Profile:
                       if o and counts_by_port.get(pt) == prof.leds_for(pt)}
             prof = replace(prof, port_orders=orders)
         return prof
+
+    def with_calibration(self, gains: dict[int, tuple[float, float, float]]) -> "Profile":
+        return replace(self, port_gains=dict(gains))
 
     @property
     def is_static(self) -> bool:

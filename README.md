@@ -51,7 +51,7 @@ Use one of the two, not both.
 |---|---|
 | **Effects studio** | Build a profile from layers (ports + effect + colors + speed …), watch it on the case preview, *Preview on device* (live), **Save to device** (stored), save/open profiles |
 | **Built-in effects** | The controller's own effects: canvases of ports, each with an effect and settings; boot canvases that play once at power-on |
-| **Ports & LEDs** | Port names, LED counts, *Identify*, *LED test* (find the count), *LED order* (reverse, start LED, presets) |
+| **Ports & LEDs** | Port names, LED counts, *Identify*, *LED test* (find the count), *LED order* (reverse, start LED, presets), *Color balance* (match a device's colors to the others, e.g. a GPU) |
 | **Palettes** | The controller's 8 palette groups |
 | **Stored animation** | What's in the controller's flash; play/stop; upload an FSEQ file |
 | **Device** | Name, firmware, power readings, startup behaviour, idle fallback, backup/restore, restart, factory reset |
@@ -70,6 +70,7 @@ opennollie leds 4-8,12-16=8 9=6                  # LED counts per port
 opennollie ledtest 9                             # interactive: find a port's LED count
 opennollie order 4 --reverse --start 3 --preview # LED order of a port
 opennollie backup settings.json                  # all controller settings; restore with: opennollie restore
+opennollie balance 9 75 80 100                   # color balance of a port (red/green/blue %)
 opennollie power                                 # input voltage/current, MCU temperature
 ```
 
@@ -121,7 +122,8 @@ Saving an unchanged profile again skips the write.
 - **Live** effects need the service (or the app) running; the controller drops live output ~3 s after the last
   frame and returns to its stored lighting.
 - Devices with their own lighting controller in ARGB-sync mode (e.g. some GPUs) may read only a few values and
-  stretch them over their LEDs. Per-port colors stay exact; per-LED patterns get smoothed.
+  stretch them over their LEDs (per-LED patterns get smoothed), and their colors can differ from the fans'
+  (e.g. weaker blue): fix that with *Color balance*.
 - The 16CH firmware has no automatic LED-count detection or power test; use `ledtest` / *LED test*.
 
 ## Troubleshooting
@@ -135,7 +137,7 @@ Saving an unchanged profile again skips the write.
 ## Development
 
 ```bash
-python3 -m unittest discover tests        # unit tests, no hardware needed
+python3 -m unittest discover tests        # unit + end-to-end tests against a simulated controller (no hardware)
 python3 -m tests.hw_roundtrip             # writes test values to a real controller and restores them
 ```
 

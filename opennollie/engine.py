@@ -9,6 +9,7 @@ from pathlib import Path
 from collections.abc import Callable
 from dataclasses import replace
 
+from . import calibration, layouts
 from . import protocol as p
 from .device import Nollie16
 from .flash import FSEQ_BASE, Flash, crc32_nollie
@@ -60,7 +61,11 @@ class Renderer:
         for fn, targets in self._jobs:
             for port, us in targets:
                 n = self.profile.leds_for(port)
-                colors = [fn(t, us[0])] * n if len(us) == 1 else [fn(t, u) for u in us]
+                gain = self.profile.port_gains.get(port)
+                if len(us) == 1:
+                    colors = [calibration.apply(fn(t, us[0]), gain)] * n
+                else:
+                    colors = [calibration.apply(fn(t, u), gain) for u in us]
                 order = orders.get(port)
                 if order:
                     wire = [(0, 0, 0)] * self.profile.wire_len(port)
@@ -118,14 +123,22 @@ def static_canvases(profile: Profile) -> tuple[CanvasLayout, list[CanvasParams]]
     owner = profile.port_layers()
     chans, params = [], []
     for layer in profile.layers:
-        ports = [pt for pt in layer.ports if owner.get(pt) is layer]
-        if ports:
+        by_gain: dict = {}                     # ports with different color balance need their own canvas
+        for pt in (pt for pt in layer.ports if owner.get(pt) is layer):
+            by_gain.setdefault(profile.port_gains.get(pt), []).append(pt)
+        for gain, ports in by_gain.items():
             params.append(CanvasParams(effect=p.EFFECTS.index("Solid"), brightness=round(100 * layer.spec.brightness),
-                                       color1=layer.spec.colors[0]))
+                                       color1=calibration.apply(layer.spec.colors[0], gain)))
             chans.append([p.PORT_TO_CH[pt - 1] for pt in ports])
     if len(params) > p.LOOP_CANVAS_MAX:
         raise ValueError(f"at most {p.LOOP_CANVAS_MAX} static layers")
     return CanvasLayout(chans), params
+
+
+def prepare(dev: Nollie16, profile: Profile) -> Profile:
+    """Fill in what lives outside the profile: the controller's LED counts and LED orders, and the
+    PC-side color balance per port."""
+    return profile.with_device_leds(*layouts.read_ports(dev)).with_calibration(calibration.load())
 
 
 def save_to_device(dev: Nollie16, profile: Profile, progress: Callable[[str, int, int], None] | None = None) -> str:

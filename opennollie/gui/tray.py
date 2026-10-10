@@ -139,7 +139,7 @@ class Tray(QObject):
                 with client.connect() as dev:
                     if isinstance(dev.transport, client.DaemonTransport):
                         dev.transport.call("live_stop")        # stored lighting takes over
-                    prof = profile.load(path).with_device_leds(*layouts.read_ports(dev))
+                    prof = engine.prepare(dev, profile.load(path))
                     msg = engine.save_to_device(dev, prof)
                 self._note.emit("OpenNollie", f"'{prof.name}' {msg}")
             except Exception as e:

@@ -2,10 +2,10 @@
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QPushButton, QSpinBox, QTableWidget, QVBoxLayout,
-                               QWidget)
+                               QHeaderView, QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QTableWidget,
+                               QVBoxLayout, QWidget)
 
-from .. import client, layouts
+from .. import calibration, client, layouts
 from .. import protocol as p
 from .caseview import CASE_LAYOUT
 from .common import Device, error, hbox
@@ -234,6 +234,75 @@ class LedOrderDialog(QDialog):
         super().done(r)
 
 
+class ColorBalanceDialog(QDialog):
+    """Match a port's colors to the others: a test color shows on every port while you adjust this
+    port's red/green/blue levels."""
+
+    TEST_COLORS = [("White", (255, 255, 255)), ("Cyan", (0, 255, 255)), ("Purple", (128, 0, 255)),
+                   ("Orange", (255, 128, 0)), ("Yellow", (255, 255, 0)), ("Pink", (255, 64, 160)),
+                   ("Green", (0, 255, 0)), ("Blue", (0, 0, 255)), ("Red", (255, 0, 0))]
+
+    def __init__(self, device: Device, port: int, label: str, counts: dict[int, int], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Color balance: port {port}" + (f" ({label})" if label else ""))
+        self.port, self.counts = port, counts
+        self.gains = calibration.load()
+        self.live = LiveSession(device, 200, self)
+        form = QFormLayout(self)
+        form.addRow(QLabel(
+            "The test color shows on <b>every</b> port. Lower this port's red / green / blue until it looks like "
+            "the others.<br><i>Example: if white looks yellowish here, lower red and green a little.</i>"))
+        self.test = QComboBox()
+        for name, rgb in self.TEST_COLORS:
+            self.test.addItem(name, rgb)
+        self.test.currentIndexChanged.connect(self._show)
+        form.addRow("Test color", self.test)
+        g = self.gains.get(port, calibration.NEUTRAL)
+        self.sliders = []
+        for i, name in enumerate(("Red", "Green", "Blue")):
+            sl = QSlider(Qt.Horizontal)
+            sl.setRange(0, 100)
+            sl.setValue(round(g[i] * 100))
+            value = QLabel()
+            sl.valueChanged.connect(lambda v, lab=value: (lab.setText(f"{v} %"), self._show()))
+            value.setText(f"{sl.value()} %")
+            value.setMinimumWidth(44)
+            form.addRow(name, hbox(sl, value, stretch=False))
+            self.sliders.append(sl)
+        form.addRow(QLabel("<small>Applies to live effects right away and to effects saved on the controller the "
+                           "next time you save them.</small>"))
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Reset | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Reset).setText("Reset to 100 %")
+        buttons.button(QDialogButtonBox.Reset).clicked.connect(lambda: [sl.setValue(100) for sl in self.sliders])
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.live.start()
+        self._show()
+
+    def gain(self) -> tuple[float, float, float]:
+        return tuple(sl.value() / 100 for sl in self.sliders)
+
+    def _show(self, *_) -> None:
+        rgb = self.test.currentData()
+        frame = {}
+        for port, n in self.counts.items():
+            if n:
+                g = self.gain() if port == self.port else self.gains.get(port)
+                frame[port] = [calibration.apply(rgb, g)] * n
+        self.live.show(frame)
+
+    def _save(self) -> None:
+        gains = calibration.load()
+        gains[self.port] = self.gain()
+        calibration.save(gains)
+        self.accept()
+
+    def done(self, r):
+        self.live.stop()
+        super().done(r)
+
+
 class PortsPage(QWidget):
     title = "Ports && LEDs"
     icon = "preferences-desktop-display"
@@ -245,13 +314,14 @@ class PortsPage(QWidget):
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel("Names and LED counts are stored on the controller. Built-in effects and profiles use the "
                              "LED counts; the names label ports everywhere in this app."))
-        self.table = QTableWidget(p.NUM_CHANNELS, 6)
-        self.table.setHorizontalHeaderLabels(["Port", "Name", "LEDs", "", "", "LED order"])
+        self.table = QTableWidget(p.NUM_CHANNELS, 7)
+        self.table.setHorizontalHeaderLabels(["Port", "Name", "LEDs", "", "", "LED order", "Color balance"])
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.names: dict[int, QLineEdit] = {}
         self.counts: dict[int, QSpinBox] = {}
         self.order_buttons: dict[int, QPushButton] = {}
+        self.balance_buttons: dict[int, QPushButton] = {}
         self._zleds = [0] * p.NUM_CHANNELS
         for row, port in enumerate(range(1, p.NUM_CHANNELS + 1)):
             item = QLabel(f"  {port}")
@@ -273,6 +343,10 @@ class PortsPage(QWidget):
             order.clicked.connect(lambda _=False, pt=port: self._order(pt))
             self.table.setCellWidget(row, 5, order)
             self.order_buttons[port] = order
+            balance = QPushButton()
+            balance.clicked.connect(lambda _=False, pt=port: self._balance(pt))
+            self.table.setCellWidget(row, 6, balance)
+            self.balance_buttons[port] = balance
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         lay.addWidget(self.table)
@@ -305,6 +379,7 @@ class PortsPage(QWidget):
                 dark = f" + {self._zleds[ch]} dark" if self._zleds[ch] else ""
                 self.order_buttons[port].setText((layouts.describe(order, counts[ch]) if order else "as wired") + dark)
             self._loaded = True
+            self._show_balance()
             self.labels_changed.emit(self.labels())
         self.device.run(load, show)
 
@@ -344,6 +419,18 @@ class PortsPage(QWidget):
         session.show({port: [(255, 255, 255)] * n})
         QTimer.singleShot(3000, lambda: (session.stop(), QTimer.singleShot(1000, session.deleteLater)))
         self.device.status.emit(f"Port {port} is lit white for 3 s")
+
+    def _show_balance(self) -> None:
+        gains = calibration.load()
+        for port, b in self.balance_buttons.items():
+            g = gains.get(port)
+            b.setText(f"R {g[0]:.0%}  G {g[1]:.0%}  B {g[2]:.0%}" if g else "neutral")
+
+    def _balance(self, port: int) -> None:
+        dlg = ColorBalanceDialog(self.device, port, self.names[port].text().strip(), self.led_counts(), self)
+        if dlg.exec():
+            self._show_balance()
+            self.labels_changed.emit(self.labels())      # the studio re-renders with the new balance
 
     def _order(self, port: int) -> None:
         ch = p.PORT_TO_CH[port - 1]
