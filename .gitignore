@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 # Raw USB captures can be large; keep them local unless explicitly added.
 captures/*.pcap*
+
+# Official vendor app (proprietary): local analysis only, never commit.
+vendor-app/
