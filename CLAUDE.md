@@ -140,14 +140,16 @@ Saved lighting has two layers: **(a)** built-in HW effects on canvases (cheap, f
 The app is **done** when every item below is checked. Keep this list current; it's the single to-do list.
 
 **Verification**
-- [ ] User has tested the GUI on the real desktop (KDE/Breeze), every page; reported issues fixed
+- [x] User has tested the GUI on the real desktop (KDE/Breeze): basic functionality works, saved settings survived
+      a PC reboot (2026-10-11). Re-test the pages that change in the remaining work.
 - [ ] Boot canvases (14+) tested on hardware: apply → power cycle → plays once at power-on
 - [ ] Factory reset run from our app (GUI) and the result verified
 - [ ] Palettes page: write from the GUI verified on hardware (reads/writes already round-trip in `hw_roundtrip`)
 
 **Installation**
-- [~] `tools/install-user.sh` run 2026-10-11 (user's OK): `opennollie` / `opennollie-gui` in ~/.local/bin, app-menu
-      entry, `opennollie.service` enabled + running (CLI verified through it). [ ] Still to verify: after a re-login/reboot
+- [x] `tools/install-user.sh` run 2026-10-11 (user's OK): `opennollie` / `opennollie-gui` in ~/.local/bin, app-menu
+      entry, `opennollie.service` enabled; after a PC reboot the service started at login (~25 s after boot) and
+      answers the CLI
 
 **Missing features (parity with NollieRGB 2.3.0)**
 - [ ] Restore settings from a backup JSON (GUI + CLI)
@@ -205,7 +207,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
       (`client.connect()` → daemon if running else USB), hosts live effects (`live PROFILE` / `--stop` / `--status`),
       pauses them while a client drives LEDs, autostart via `~/.config/opennollie/daemon.toml: live_profile`.
       Verified: CLI via daemon, live in daemon, pause/resume, controller reboot → reconnect, clean SIGTERM.
-- [ ] systemd user unit + install script (needs the user's OK)
+- [x] systemd user unit + install script (installed 2026-10-11, survives reboot)
 - [ ] Backup/restore of the device config (JSON)
 
 ### Phase 5: GUI (PySide6) — `python3 -m opennollie.gui`
@@ -216,7 +218,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
       identify, LED test dialog), Palettes (+ import/export), Stored animation (status, play/stop, FSEQ upload),
       Device (name, power, startup playlist, idle fallback, backup JSON, restart, factory reset)
 - [x] Offscreen screenshot check of every page; every effect exercised in the editor without errors
-- [ ] User test on the real desktop (Breeze style)
+- [x] User test on the real desktop (basic functionality OK)
 - [ ] Restore from backup JSON; LED-order (vmap) editor + component presets; tray icon / quick profile switch
 
 ### Phase 6: Packaging
