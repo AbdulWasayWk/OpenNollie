@@ -50,7 +50,7 @@ showed every group correctly.
 | 6  | 9  | Bottom back intake fan |
 | 7  | 10 | Bottom middle intake fan |
 | 8  | 11 | Bottom front intake fan |
-| 9  | 4  | GPU (GPU's own ARGB set to external sync via OpenRGB) |
+| 9  | 4  | GPU (its own ARGB controller in external-sync mode; **reads only the first 6 values** and stretches/blends them over its ~8 LEDs) |
 | 10 | 5  | — (not connected) |
 | 11 | 6  | — (not connected) |
 | 12 | 7  | CPU cooler fan, back |
@@ -60,7 +60,8 @@ showed every group correctly.
 | 16 | 12 | Side top intake fan |
 
 Groups: exhaust = 4, 5 · bottom intake = 6–8 · side intake = 14–16 · CPU cooler = 12, 13 · GPU = 9.
-Used ports: `4-9,12-16`. Real LED counts per device are unknown; the firmware has LED-count auto-detection.
+Used ports: `4-9,12-16`. **LED counts (stored on the device): fans 8, GPU 6** (= values the GPU reads, found with `ledtest`).
+16CH firmware has no LED auto-detection; use `opennollie ledtest PORT`.
 
 ## Firmware model (fw 2.3.0), summary
 
@@ -179,12 +180,14 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Open questions
 - What's on interface 1 (keyboard, 8 B IN)? Probably irrelevant.
-- Real LED counts per fan/GPU are unknown, and the 16CH can't auto-detect them. Ask the user for fan/GPU models,
-  or count visually with a per-LED test pattern.
 - What exactly is mode SL (2)? It's seen for ~2–3 s after an FSEQ upload/stop; PLAY is ignored then.
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: **GPU on port 9 is not 1:1.** A 12-color per-LED pattern showed as 8 blended colors from only the first few
+  inputs. `ledtest` N=6 (1–5 green, 6 blue, 7 red) showed ~80 % green + 20 % blue and no red, so the GPU reads 6 values and
+  interpolates them over its own LEDs. Per-port colors are exact; per-LED effects are smoothed by the GPU. Stored
+  counts: fans 8, GPU 6. The user had thought 10. (source: user observation)
 - 2026-10-11: Effects engine works end to end: live streaming of `airflow-rainbow` (~5 % CPU, mode stays ONLINE while
   streaming; user confirmed the drifting per-fan hues), and `save` rendered it to a 300-frame loop (309 KiB) stored and
   playing from the device in 3.9 s. Profiles assume 32 LEDs/port until real counts are known. (source: hardware)

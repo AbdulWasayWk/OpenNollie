@@ -230,6 +230,8 @@ def cmd_ledtest(dev: Nollie16, args) -> None:
                 time.sleep(0.12)
         print(f"port {port}: green = LEDs 1..N-1, BLUE = LED N, RED = LED N+1.\n"
               "Adjust N until the blue LED is lit and no red LED is: then N is the LED count.\n"
+              "(Devices with their own controller, e.g. a GPU in ARGB-sync mode, may stretch the values over\n"
+              " their LEDs: then N is how many values they read, i.e. the largest N that still shows blue.)\n"
               "Enter a number, + / - (step 1), ++ / -- (step 10), or empty to accept.")
         while True:
             ka.show({c: [] for c in range(p.NUM_CHANNELS)} | {ch: ledtest_frame(n)})
