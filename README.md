@@ -103,14 +103,17 @@ brightness = 0.7
 ```
 
 - **Effects:** `static`, `gradient`, `breathe`, `cycle`, `rainbow`, `wave`, `comet`, `blink`, `flicker`,
-  `keyframes`, or the controller's own as `hw:<name>` (e.g. `hw:Rainbow cycle`; list: `opennollie effects`).
-- `unit = "led"` makes an effect run along each LED instead of coloring whole ports; `span = "port"` repeats it on
-  every port, `span = "group"` runs it across all of them.
+  `keyframes` (`opennollie effects`). The controller's own built-in effects are set on the *Built-in effects* page.
+- `spread = 0` (the default) keeps every port **in sync**; `spread > 0` makes the pattern **flow** across the ports
+  (1 = one full cycle across them). `unit = "led"` runs it along the LEDs instead: `span = "port"` around each fan
+  (fans in sync), `span = "group"` along all LEDs as one strip.
 - LED counts and LED order come from the controller unless a profile sets `leds`.
 
-**How "Save to device" stores a profile:** if every layer is `static` or `hw:…`, it becomes the controller's
-built-in canvases. Otherwise the whole loop is rendered (frames = the least common multiple of the layers'
-cycle times, up to 120 s) and stored as an animation that plays at power-on.
+**How "Save to device" stores a profile:** if every layer is `static`, it becomes the controller's built-in
+Solid canvases (instant). Otherwise the whole loop is rendered (frames = the least common multiple of the layers'
+cycle times, up to 120 s) and stored as an animation that plays at power-on. While the controller writes a new
+animation to its memory, its LEDs pause for about 2 seconds (firmware behaviour; the official app has it too).
+Saving an unchanged profile again skips the write.
 
 ## Limits
 

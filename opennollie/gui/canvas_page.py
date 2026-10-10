@@ -193,7 +193,7 @@ class CanvasPage(QWidget):
     def _apply(self) -> None:
         loop, boot = self.loop.value(), self.boot.value()
         def write(d):
-            Flash(d).stop()
+            d.set_mode(Mode.HARDWARE)        # stops a stored animation instantly (no dark pause)
             d.set_canvases(loop[0], loop[1], boot=False)
             d.set_frame_ms(loop[2], boot=False)
             d.set_canvases(boot[0], boot[1], boot=True)

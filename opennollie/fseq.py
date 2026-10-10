@@ -15,7 +15,7 @@ then 8 bytes per compression block (none here), 6 bytes per sparse range (u24 st
 """
 
 import struct
-import time
+import zlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -84,10 +84,12 @@ def build_fseq(led_map: Sequence[int], step_ms: int, frames: Iterable[Mapping[in
 
     var_offset = HEADER_LEN + 6 * len(ranges)
     data_offset = (var_offset + 3) & ~3
+    # The "unique id" is derived from the content, so rendering the same thing twice gives the same file.
+    uid = zlib.crc32(bytes(body)) << 32 | zlib.crc32(repr((led_map, step_ms)).encode())
     head = struct.pack(
         "<4sHBBHIIBBBBBBQ",
         MAGIC, data_offset, 0, 2, var_offset, frame_bytes, frame_count, step_ms,
-        0, 0, 0, len(ranges), 0, time.time_ns() & 0xFFFF_FFFF_FFFF_FFFF,
+        0, 0, 0, len(ranges), 0, uid,
     )
     rng = b"".join(s.to_bytes(3, "little") + n.to_bytes(3, "little") for s, n in ranges)
     return head + rng + bytes(data_offset - var_offset) + bytes(body)

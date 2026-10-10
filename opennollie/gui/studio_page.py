@@ -560,8 +560,9 @@ class StudioPage(QWidget):
             self.live_btn.setChecked(False)
             return error(self, "Preview", phase[6:])
         if hasattr(self, "dlg"):
-            self.dlg.setLabelText({"render": "Rendering…", "erase": "Erasing…", "write": "Writing…",
-                                   "verify": "Verifying…"}.get(phase, phase))
+            pause = "\n(the lights pause for about 2 s while the controller saves to its memory)"
+            self.dlg.setLabelText({"render": "Rendering…", "erase": "Erasing…" + pause, "write": "Writing…" + pause,
+                                   "verify": "Verifying…" + pause}.get(phase, phase))
             self.dlg.setValue(int(100 * done / max(total, 1)))
 
     def _saved(self, msg: str) -> None:

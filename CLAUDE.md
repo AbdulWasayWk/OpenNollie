@@ -236,6 +236,14 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: **Mode SL = LEDs paused (dark) while the flash is busy.** Triggered by the STOP command (`F3 03`) and by
+  any flash access (CRC, writes; erase didn't seem to on its own). It lasts until ~1.2 s after the last flash op, ignores
+  live frames and PLAY, and can't be cut short; afterwards the device returns to its stored lighting. **`FA 01 01`
+  (mode HW) stops FSEQ playback instantly with no SL.** So: stop via mode switch, static saves never touch flash, and
+  unchanged animations aren't re-uploaded (fingerprint kept in `~/.local/state/opennollie/stored.json`; FSEQ files
+  are now deterministic). New-animation save: 1.8 s dark (was ~2 s+); re-save / static save: 0 s. (source: hw traces)
+- 2026-10-11: User feedback: effects looked out of sync because new studio layers used spread 1.0 (every fan a different
+  phase) and that carried over to every effect. Now in sync by default with an explicit "Pattern" choice.
 - 2026-10-11: The Bash tool kills background children when a command ends, so start GUI/tray processes for the user
   with `systemd-run --user …` (the user manager has WAYLAND_DISPLAY etc.). No pip on the system: build wheels with
   `setuptools.build_meta` directly. (source: this session)
@@ -283,6 +291,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Decision log
 <!-- Newest first. Format: YYYY-MM-DD: decision; reason -->
+- 2026-10-11: The firmware's built-in effects are **not** profile effects any more (`hw:` removed from profiles, studio,
+  tray). They couldn't be previewed or fully edited there (user request). They stay on the Built-in effects page
+  (canvases). Static-only profiles are still stored as Solid canvases.
+- 2026-10-11: Ports are **in sync by default** (spread 0); flowing across ports / around fans / along all LEDs is an
+  explicit choice (user feedback).
 - 2026-10-10: Target **fw 2.3.0 only**; legacy-fw code removed (in git history). Reason: the user's device is updated,
   and the scope is this machine.
 - 2026-10-10: Goal expanded to **parity with NollieRGB 2.3.0** plus our software effects engine (user request).

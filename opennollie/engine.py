@@ -1,14 +1,17 @@
 """Render profiles to frames; run them live or store them on the device."""
 
+import json
 import math
+import os
 import threading
 import time
+from pathlib import Path
 from collections.abc import Callable
 from dataclasses import replace
 
 from . import protocol as p
 from .device import Nollie16
-from .flash import FSEQ_BASE, Flash
+from .flash import FSEQ_BASE, Flash, crc32_nollie
 from .fseq import build_fseq
 from .profile import Layer, Profile
 from .protocol import BootIntro, BootSteady, CanvasLayout, CanvasParams, Mode, RGB
@@ -131,20 +134,45 @@ def save_to_device(dev: Nollie16, profile: Profile, progress: Callable[[str, int
     flash = Flash(dev)
     if profile.is_static:
         layout, params = static_canvases(profile)
-        flash.stop()
+        dev.set_mode(Mode.HARDWARE)
         dev.set_canvases(layout, params)
         dev.set_boot_playlist(BootIntro.START_CANVAS, BootSteady.HW_EFFECTS)
         dev.set_mode(Mode.HARDWARE)
         return f"stored as {len(params)} hardware canvas(es)"
     data, led_map = render_fseq(profile, lambda i, n: progress("render", i, n))
-    info = flash.upload_fseq(data, led_map, progress)
-    if not info.present:
-        raise IOError("device does not report the uploaded animation")
+    fingerprint = {"crc": crc32_nollie(data), "size": len(data), "led_map": led_map}
+    stored = _stored_animation(dev.serial)
+    info = flash.fseq_info()
+    unchanged = stored == fingerprint and info.present and info.size == len(data) and flash.fseq_led_map() == led_map
+    if not unchanged:        # (checked without touching flash: any flash access pauses the LEDs)
+        info = flash.upload_fseq(data, led_map, progress)
+        if not info.present:
+            raise IOError("device does not report the uploaded animation")
+        _stored_animation(dev.serial, fingerprint)
     dev.set_boot_playlist(BootIntro.NONE, BootSteady.FSEQ_LOOP)
     if not flash.play(loop=True):
         flash.play(loop=True)
     n, _ = loop_frames(profile)
-    return f"stored as animation: {n} frames ({n / profile.fps:.1f} s loop), {len(data) // 1024} KiB"
+    what = "already stored, now playing" if unchanged else f"stored as animation, {len(data) // 1024} KiB"
+    return f"{what}: {n} frames ({n / profile.fps:.1f} s loop)"
+
+
+STATE_FILE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "opennollie" / "stored.json"
+
+
+def _stored_animation(serial: str, fingerprint: dict | None = None) -> dict | None:
+    """Remember (or recall) what we last uploaded to this controller, so an unchanged profile isn't
+    rewritten: the controller pauses its LEDs while its flash is written."""
+    try:
+        state = json.loads(STATE_FILE.read_text())
+    except (OSError, ValueError):
+        state = {}
+    if fingerprint is None:
+        return state.get(serial)
+    state[serial] = fingerprint
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state))
+    return fingerprint
 
 
 def run_live(dev: Nollie16, profile: Profile, stop: threading.Event | None = None,

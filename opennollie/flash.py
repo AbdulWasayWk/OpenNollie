@@ -200,7 +200,10 @@ class Flash:
         return self.play_status()[0]
 
     def stop(self) -> None:
-        self.dev.send(p.packet(Cmd.REC_CTRL, RecCtrl.STOP))
+        """Stop the stored animation: switch to built-in effects (instant; the firmware's STOP command
+        would blank the LEDs for ~1.5 s in mode SL)."""
+        if self.dev.mode() in (p.Mode.FSEQ, p.Mode.SL):
+            self.dev.set_mode(p.Mode.HARDWARE)
 
     def play_status(self) -> tuple[bool, int, int]:
         """(playing, frame/position, result code)."""
@@ -214,7 +217,11 @@ class Flash:
         last_block = (FSEQ_BASE + total - 1) & ~(ERASE_BLOCK - 1)
         n_blocks = (last_block - FSEQ_BASE) // ERASE_BLOCK + 1
 
-        self.stop()
+        # Stop reading the region we're about to overwrite. Switching to built-in effects does that instantly;
+        # the STOP command would put the device in SL (LEDs dark) right away. Flash writes cause SL anyway,
+        # until ~1.2 s after the last write: an unavoidable short pause of the lights.
+        if self.dev.mode() == p.Mode.FSEQ:
+            self.dev.set_mode(p.Mode.HARDWARE)
         self.set_fseq_led_map(led_map)
 
         for i in range(n_blocks):

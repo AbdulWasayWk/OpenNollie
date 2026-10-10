@@ -35,7 +35,7 @@ class AnimationPage(QWidget):
         play.clicked.connect(lambda: self.device.run(lambda d: Flash(d).play(self.loop.isChecked()),
                                                      lambda ok: (self.refresh(), None if ok else
                                                                  error(self, "Play", "The controller didn't start playback."))))
-        stop.clicked.connect(lambda: self.device.run(lambda d: (Flash(d).stop(), d.set_mode(p.Mode.HARDWARE)),
+        stop.clicked.connect(lambda: self.device.run(lambda d: Flash(d).stop(),
                                                      lambda _: self.refresh()))
         refresh.clicked.connect(self.refresh)
         f.addRow("", hbox(play, stop, self.loop, refresh))
