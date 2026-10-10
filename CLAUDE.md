@@ -34,6 +34,32 @@ An open-source Linux app for the **Nollie 16CH RGB** controller (USB `3061:4716`
   writes `captures/<name>.pcapng`. The user is in the `wireshark` group, but it isn't active until
   they re-login; `capture.sh` falls back to a private dumpcap copy until then.
 
+## Port map (this machine)
+
+Port numbers are OpenRGB's / our CLI's (`Channel 1..16`). Verified 2026-10-10 with `opennollie identify`.
+
+| Port | Wire ch | Device |
+|------|---------|--------|
+| 1  | 19 | — (not connected) |
+| 2  | 18 | — (not connected) |
+| 3  | 17 | — (not connected) |
+| 4  | 16 | Back exhaust fan |
+| 5  | 24 | Top exhaust fan |
+| 6  | 25 | Bottom back intake fan |
+| 7  | 26 | Bottom middle intake fan |
+| 8  | 27 | Bottom front intake fan |
+| 9  | 20 | GPU (GPU's own ARGB set to external sync via OpenRGB) |
+| 10 | 21 | — (not connected) |
+| 11 | 22 | — (not connected) |
+| 12 | 23 | CPU cooler fan, back |
+| 13 | 31 | CPU cooler fan, front |
+| 14 | 30 | Side middle intake fan |
+| 15 | 29 | Side bottom intake fan |
+| 16 | 28 | Side top intake fan |
+
+Groups (for default profiles): exhaust = 4, 5 · bottom intake = 6–8 · side intake = 14–16 ·
+CPU cooler = 12, 13 · GPU = 9. Used ports: `4-9,12-16`.
+
 ## Architecture (decided)
 
 **Python 3 + hidapi + PySide6 (Qt)**. It iterates fast during reverse engineering, an effects
@@ -72,13 +98,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Python deps from pacman: `python-hidapi` 0.14 (module `hid`, hidraw backend), `pyside6` 6.11. No venv
 - [x] `git init`
 
-### Phase 1: Baseline live control
+### Phase 1: Baseline live control ✅ (2026-10-10)
 - [x] Read OpenRGB's Nollie controller source → `docs/PROTOCOL.md`
 - [x] `opennollie/protocol.py` (packet builders) + `device.py` (hidapi) + `cli.py` (`set`, `off`, `identify`)
       with unit tests (`python3 -m unittest discover tests`)
 - [x] LED count per channel: N/A as a separate command; on the 16CH the count is part of every packet
 - [x] Verified on wire (capture) and on hardware: all fans + GPU showed dim blue, so GRB order is correct
-- [ ] Map OpenRGB port numbers to board labels (`python3 -m opennollie identify`)
+- [x] Map ports to physical devices (`identify`). See **Port map**. Board labels aren't visible (case closed)
 - [x] Device holds the last frame after the host stops sending (several minutes observed); no keep-alive needed
 
 ### Phase 2: Capture sessions (Windows app in the VM, sniffed on the host)
@@ -113,15 +139,16 @@ One action per capture, about 3 s between steps:
 - [ ] PKGBUILD, udev rule, systemd unit, README
 
 ## Open questions
-- What's connected to each port (device type and LED count)? Known so far: **port 9 = GPU** (GPU's ARGB in
-  "external" sync mode via OpenRGB). The rest are fans; mapping pending `identify`.
+- LED count per device? Not needed yet: we drive 256 LEDs/port and the extra data is ignored.
 - Windows app name and version? Is it .NET or Electron, i.e. can it be decompiled?
 - Which effects can the firmware store? Can it store custom or keyframe animations, or only
   built-in ones?
-- Do OpenRGB's port numbers (Channel 1..16) match the labels printed on the board?
+- Do OpenRGB's port numbers match the labels printed on the board? Unknown (case closed); doesn't matter in practice.
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-10: Port → device mapping done via `identify` (see Port map); ports 1-3, 10, 11 are unused.
+  (source: user observation)
 - 2026-10-10: Hardware test passed: `set all blue --brightness 30` turned all fans and the GPU dim blue, and the colors
   stayed after the program exited, so the device holds the last frame. GPU is on port 9 (OpenRGB "Channel 9"), with
   the GPU's own ARGB set to external sync. (source: user observation)
