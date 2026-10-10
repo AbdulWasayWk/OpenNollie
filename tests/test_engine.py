@@ -61,6 +61,14 @@ class Profiles(unittest.TestCase):
         self.assertEqual(prof.port_layers()[4].spec.kind, "static")    # later layer wins
         self.assertFalse(prof.is_hardware)
 
+    def test_device_led_counts(self):
+        prof = loads('[ports.9]\nleds = 12\n[[layer]]\neffect = "rainbow"')
+        self.assertEqual(prof.leds_for(4), 32)                          # fallback before resolving
+        resolved = prof.with_device_leds({4: 8, 9: 10})
+        self.assertEqual((resolved.leds_for(4), resolved.leds_for(9)), (8, 12))   # profile wins
+        fixed = loads('leds = 5\n[[layer]]\neffect = "rainbow"').with_device_leds({4: 8})
+        self.assertEqual(fixed.leds_for(4), 5)
+
     def test_port_order_is_kept(self):
         self.assertEqual(parse_ports("16-14,9"), [16, 15, 14, 9])
 

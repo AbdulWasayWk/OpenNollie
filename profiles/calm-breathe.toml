@@ -1,7 +1,7 @@
 # Slow blue/purple breathing on the fans (offset so they ripple), steady white GPU.
 name = "Calm breathe"
 fps = 30
-leds = 32
+
 
 [groups]
 fans = "8,7,6,15,14,16,13,12,4,5"

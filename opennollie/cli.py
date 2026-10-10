@@ -190,6 +190,67 @@ def cmd_identify(dev: Nollie16, args) -> None:
                 time.sleep(args.delay or 3)
 
 
+def cmd_leds(dev: Nollie16, args) -> None:
+    """Show or set LED counts per port (stored on the device; built-in effects use them too)."""
+    counts = dev.led_counts()
+    if args.assignments:
+        for item in args.assignments:
+            ports_s, _, n = item.partition("=")
+            if not n.isdigit() or not 1 <= int(n) <= p.LEDS_PER_CHANNEL:
+                sys.exit(f"bad assignment {item!r}: use PORTS=COUNT, e.g. 4-8,12-16=8 9=10")
+            for port in parse_ports(ports_s):
+                counts[p.PORT_TO_CH[port - 1]] = int(n)
+        dev.set_led_counts(counts)
+        time.sleep(0.15)
+        if dev.led_counts() != counts:
+            sys.exit("device did not accept the LED counts (LED + zLED must be <= 256 per port)")
+    for port in range(1, p.NUM_CHANNELS + 1):
+        print(f"port {port:2d}: {counts[p.PORT_TO_CH[port - 1]]:3d} LEDs")
+
+
+def ledtest_frame(n: int) -> list[RGB]:
+    """LEDs 1..n-1 green, LED n blue (the last one if n is the count), LED n+1 red (shouldn't exist)."""
+    return [(0, 60, 0)] * (n - 1) + [(0, 0, 255), (255, 0, 0)]
+
+
+def cmd_ledtest(dev: Nollie16, args) -> None:
+    port = args.port
+    ch = p.PORT_TO_CH[port - 1]
+    n = args.start or min(dev.led_counts()[ch], 64)
+    with KeepAlive(dev) as ka:
+        if args.chase:
+            print(f"port {port}: a light runs along the first {n} LEDs; Ctrl-C to stop")
+            step = 0
+            while True:
+                frame = [(0, 0, 0)] * n
+                for k in range(3):
+                    frame[(step - k) % n] = scale((255, 255, 255), 100 >> k)
+                ka.show({c: [] for c in range(p.NUM_CHANNELS)} | {ch: frame})
+                step += 1
+                time.sleep(0.12)
+        print(f"port {port}: green = LEDs 1..N-1, BLUE = LED N, RED = LED N+1.\n"
+              "Adjust N until the blue LED is lit and no red LED is: then N is the LED count.\n"
+              "Enter a number, + / - (step 1), ++ / -- (step 10), or empty to accept.")
+        while True:
+            ka.show({c: [] for c in range(p.NUM_CHANNELS)} | {ch: ledtest_frame(n)})
+            cmd = input(f"N = {n}> ").strip()
+            if not cmd:
+                break
+            step = {"+": 1, "-": -1, "++": 10, "--": -10}.get(cmd)
+            if step is not None:
+                n += step
+            elif cmd.isdigit():
+                n = int(cmd)
+            else:
+                print("  ?")
+            n = max(1, min(p.LEDS_PER_CHANNEL - 1, n))
+    if args.save or input(f"store {n} LEDs for port {port} on the device? [y/N] ").strip().lower() == "y":
+        counts = dev.led_counts()
+        counts[ch] = n
+        dev.set_led_counts(counts)
+        print(f"port {port}: {n} LEDs stored")
+
+
 def cmd_static(dev: Nollie16, args) -> None:
     """Stored per-port solid colors: ports sharing a color share one Solid canvas."""
     if len(args.assignments) % 2:
@@ -224,15 +285,20 @@ def _progress(phase: str, done: int, total: int) -> None:
         print(f"{start}  {phase} {pct}%" if pct == 0 else f" {pct}%", end=end, flush=True)
 
 
+def load_profile(dev: Nollie16, path: str) -> profile.Profile:
+    counts = dev.led_counts()
+    return profile.load(path).with_device_leds({pt: counts[p.PORT_TO_CH[pt - 1]] for pt in range(1, p.NUM_CHANNELS + 1)})
+
+
 def cmd_live(dev: Nollie16, args) -> None:
-    prof = profile.load(args.profile)
+    prof = load_profile(dev, args.profile)
     print(f"streaming '{prof.name}' at {prof.fps} fps; Ctrl-C to stop "
           f"(the device returns to its stored lighting ~3 s after)")
     engine.run_live(dev, prof, duration=args.duration)
 
 
 def cmd_save(dev: Nollie16, args) -> None:
-    prof = profile.load(args.profile)
+    prof = load_profile(dev, args.profile)
     print(f"saving '{prof.name}' to the device…")
     print(engine.save_to_device(dev, prof, _progress))
 
@@ -297,6 +363,17 @@ def main(argv=None) -> None:
     sp.add_argument("ports", nargs="?", default="all")
     sp.add_argument("--delay", type=float, help="seconds per port (default: wait for Enter)")
     sp.set_defaults(func=cmd_identify)
+
+    sp = sub.add_parser("leds", help="show or set LED counts per port (stored on the device)",
+                        description="e.g.  leds   |   leds 4-8,12-16=8 9=10")
+    sp.add_argument("assignments", nargs="*", metavar="PORTS=COUNT")
+    sp.set_defaults(func=cmd_leds)
+    sp = sub.add_parser("ledtest", help="interactive: find how many LEDs a port has")
+    sp.add_argument("port", type=int, choices=range(1, p.NUM_CHANNELS + 1), metavar="PORT")
+    sp.add_argument("--start", type=int, help="initial guess (default: stored count, max 64)")
+    sp.add_argument("--chase", action="store_true", help="show a running light instead (Ctrl-C to stop)")
+    sp.add_argument("--save", action="store_true", help="store the result without asking")
+    sp.set_defaults(func=cmd_ledtest)
 
     sp = sub.add_parser("static", help="stored: solid colors per port, kept on the device (unlisted ports: no canvas)",
                         description="e.g.  static 4,5 red 6-8 00ff00 9 white   (uses --brightness)")

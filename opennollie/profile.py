@@ -2,7 +2,7 @@
 
     name = "Evening"
     fps = 30                    # live/render frame rate
-    leds = 32                   # default LEDs per port (override per port below)
+    leds = 32                   # LEDs per port; omit to use the counts stored on the device
 
     [groups]                    # optional names for port sets
     intake = "6-8,14-16"
@@ -27,7 +27,7 @@ rendered to an animation (FSEQ) or streamed live.
 """
 
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import protocol as p
@@ -61,13 +61,20 @@ class Layer:
 class Profile:
     name: str = "Untitled"
     fps: int = 30
-    leds: int = 32
+    leds: int | None = None                 # None: use the device's stored counts (fallback 32)
     port_leds: dict[int, int] = field(default_factory=dict)
     groups: dict[str, list[int]] = field(default_factory=dict)
     layers: list[Layer] = field(default_factory=list)
 
     def leds_for(self, port: int) -> int:
-        return self.port_leds.get(port, self.leds)
+        return self.port_leds.get(port, self.leds or 32)
+
+    def with_device_leds(self, counts_by_port: dict[int, int]) -> "Profile":
+        """Fill in LED counts the profile leaves open from the device's stored counts."""
+        if self.leds is not None:
+            return self
+        merged = {pt: n for pt, n in counts_by_port.items() if 1 <= n <= p.LEDS_PER_CHANNEL} | self.port_leds
+        return replace(self, port_leds=merged)
 
     @property
     def is_hardware(self) -> bool:
@@ -143,14 +150,14 @@ def from_dict(d: dict) -> Profile:
     prof = Profile(
         name=str(d.get("name", "Untitled")),
         fps=int(d.get("fps", 30)),
-        leds=int(d.get("leds", 32)),
+        leds=int(d["leds"]) if "leds" in d else None,
         port_leds={int(k): int(v["leds"]) for k, v in d.get("ports", {}).items() if "leds" in v},
         groups=groups,
         layers=[layer_from_dict(l, groups) for l in d.get("layer", [])],
     )
     if not 1 <= prof.fps <= 120:
         raise ValueError("fps must be 1..120")
-    if any(not 1 <= n <= p.LEDS_PER_CHANNEL for n in [prof.leds, *prof.port_leds.values()]):
+    if any(not 1 <= n <= p.LEDS_PER_CHANNEL for n in [prof.leds or 1, *prof.port_leds.values()]):
         raise ValueError(f"LED counts must be 1..{p.LEDS_PER_CHANNEL}")
     if not prof.layers:
         raise ValueError("profile has no [[layer]]")

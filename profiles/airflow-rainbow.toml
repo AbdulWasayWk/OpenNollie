@@ -1,7 +1,7 @@
 # A rainbow that travels with the airflow: intake fans → GPU → CPU cooler → exhaust.
 name = "Airflow rainbow"
 fps = 30
-leds = 32
+
 
 [groups]
 airflow = "8,7,6,15,14,16,9,13,12,4,5"
