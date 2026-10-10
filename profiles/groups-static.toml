@@ -1,0 +1,32 @@
+# Static colors per group. All layers are static, so `save` stores this as hardware canvases.
+name = "Group colors"
+
+[[layer]]
+ports = "4,5"
+effect = "static"
+color = "red"
+brightness = 0.4
+
+[[layer]]
+ports = "6-8"
+effect = "static"
+color = "green"
+brightness = 0.4
+
+[[layer]]
+ports = "9"
+effect = "static"
+color = "white"
+brightness = 0.4
+
+[[layer]]
+ports = "12,13"
+effect = "static"
+color = "purple"
+brightness = 0.4
+
+[[layer]]
+ports = "14-16"
+effect = "static"
+color = "cyan"
+brightness = 0.4

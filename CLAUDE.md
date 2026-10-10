@@ -161,9 +161,15 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [ ] Backup/restore JSON (compatible with the app's export format if practical), factory reset, reboot
 
 ### Phase 4: Effects engine + headless product
-- [ ] Software effects (static, breathe, rainbow, wave, gradient, …), user-defined (config-driven)
-- [ ] Live streaming engine; render-to-FSEQ for save-to-device
-- [ ] Profiles (TOML), daemon (systemd user service), full CLI
+- [x] `effects.py`: static, gradient, breathe, cycle, rainbow, wave, comet, blink, flicker, **keyframes** (user-defined);
+      all periodic (seamless loops); `unit` port/led, `span` port/group, port order = travel order
+- [x] `profile.py`: TOML profiles with groups, per-port LED counts, layers (later wins), `hw:<firmware effect>`
+- [x] `engine.py`: Renderer, loop length = LCM of periods (≤ 120 s), live streaming, render→FSEQ, `save_to_device`
+      (all static/hw → canvases; otherwise FSEQ + boot loop). CLI: `live`, `save`, `render`, `play`, `stop`, `effects`
+- [x] Verified on hardware: `live profiles/airflow-rainbow.toml` (user confirmed), `save` same profile (3.9 s,
+      plays from the device, boot playlist FSEQ loop)
+- [ ] Daemon (systemd user service) owning the device + local API for CLI/GUI; profile switching
+- [ ] Backup/restore of the device config (JSON)
 
 ### Phase 5: GUI (PySide6)
 - [ ] Pages mirroring the feature catalog + our effects editor and live preview
@@ -179,6 +185,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: Effects engine works end to end: live streaming of `airflow-rainbow` (~5 % CPU, mode stays ONLINE while
+  streaming; user confirmed the drifting per-fan hues), and `save` rendered it to a 300-frame loop (309 KiB) stored and
+  playing from the device in 3.9 s. Profiles assume 32 LEDs/port until real counts are known. (source: hardware)
 - 2026-10-11: **Stored animations work end to end**: FSEQ upload 190 KB in 1.6 s with matching device CRC, PLAY loops
   (mode FSEQ), boot playlist steady=FSEQ loop survives a controller reboot and plays at power-on. **FSEQ frame bytes
   are sent to the LEDs unconverted, so store GRB** (bytes 00 66 00 showed red). PLAY is ignored for ~2–3 s after an

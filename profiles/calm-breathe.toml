@@ -1,0 +1,22 @@
+# Slow blue/purple breathing on the fans (offset so they ripple), steady white GPU.
+name = "Calm breathe"
+fps = 30
+leds = 32
+
+[groups]
+fans = "8,7,6,15,14,16,13,12,4,5"
+
+[[layer]]
+ports = "fans"
+effect = "breathe"
+colors = ["#0040ff", "#8000ff"]   # alternate each breath
+period = 6
+spread = 0.3
+min = 0.15                        # never fully dark
+brightness = 0.7
+
+[[layer]]
+ports = "9"
+effect = "static"
+color = "white"
+brightness = 0.4

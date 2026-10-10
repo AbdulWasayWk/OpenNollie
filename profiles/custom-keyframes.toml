@@ -1,0 +1,24 @@
+# Fully custom style: your own color timeline per group.
+name = "Sunset keyframes"
+fps = 30
+leds = 32
+
+[groups]
+intake = "8,7,6,15,14,16"
+rear = "9,13,12,4,5"
+
+[[layer]]
+ports = "intake"
+effect = "keyframes"
+period = 12
+spread = 0.25                     # neighbours lag a little behind each other
+interp = "smooth"
+keyframes = [[0.0, "#ff2000"], [0.3, "#ff8000"], [0.6, "#a000ff"], [0.85, "#200060"]]
+
+[[layer]]
+ports = "rear"
+effect = "comet"
+colors = ["#ffa040", "#100008"]   # head, background
+period = 3
+tail = 0.6
+brightness = 0.8

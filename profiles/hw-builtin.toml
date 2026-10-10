@@ -1,0 +1,15 @@
+# The controller's own built-in effects (no animation upload). Names: `opennollie effects`.
+name = "Built-in effects"
+
+[[layer]]
+ports = "4-8,12-16"
+effect = "hw:Rainbow cycle"
+brightness = 0.6
+step = 2            # speed
+size = 3
+
+[[layer]]
+ports = "9"
+effect = "hw:Breath"
+colors = ["#00c0ff", "#ff00ff", "#ffffff"]
+brightness = 0.5

@@ -3,10 +3,13 @@
 import argparse
 import json
 import sys
+import threading
 import time
 
+from . import engine, fseq, profile
 from . import protocol as p
 from .device import DeviceNotFound, NoResponse, Nollie16
+from .flash import Flash
 from .model import DeviceState
 from .protocol import CanvasLayout, CanvasParams, Mode, RGB
 
@@ -99,12 +102,61 @@ def cmd_power(dev: Nollie16, args) -> None:
         print(f"{name:<14} {value:8.3f} {units[name]}")
 
 
+def cmd_render(args) -> None:
+    prof = profile.load(args.profile)
+    data, led_map = engine.render_fseq(prof)
+    open(args.output, "wb").write(data)
+    hdr = fseq.parse_header(data)
+    ports = ",".join(f"{p.CH_TO_PORT[ch]}:{n}" for ch, n in enumerate(led_map) if n)
+    print(f"{args.output}: {hdr.frame_count} frames @ {1000 // hdr.step_ms} fps, {len(data) // 1024} KiB; "
+          f"upload with: opennollie play {args.output} --map {ports}")
+
+
+def cmd_effects(args) -> None:
+    from .effects import EFFECTS
+    print("software effects:", ", ".join(sorted(EFFECTS)))
+    print("hardware effects (effect = \"hw:<name>\"):", ", ".join(p.EFFECTS))
+
+
 def live_frame(assign: dict[int, RGB], leds: int) -> dict[int, list[RGB]]:
     """port -> color  ==>  fw channel -> LED colors (all channels; unassigned ones off)."""
     frame = {ch: [(0, 0, 0)] * leds for ch in range(p.NUM_CHANNELS)}
     for port, color in assign.items():
         frame[p.PORT_TO_CH[port - 1]] = [color] * leds
     return frame
+
+
+class KeepAlive:
+    """Re-send the current live frame every second: the device drops live output ~3 s after the last
+    frame (idle timeout) and returns to its stored lighting."""
+
+    def __init__(self, dev: Nollie16):
+        self.dev, self.frame = dev, None
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def show(self, frame) -> None:
+        self.frame = frame
+        self.dev.send_frame(frame)
+        if not self.thread.is_alive():
+            self.thread.start()
+
+    def _run(self) -> None:
+        while not self.stop.wait(1.0):
+            self.dev.send_frame(self.frame)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.stop.set()
+
+
+def hold(args) -> None:
+    if args.duration is None:
+        print("holding; Ctrl-C to stop (the device returns to its stored lighting ~3 s after)", flush=True)
+        threading.Event().wait()
+    time.sleep(args.duration)
 
 
 def cmd_set(dev: Nollie16, args) -> None:
@@ -114,24 +166,28 @@ def cmd_set(dev: Nollie16, args) -> None:
     for ports_s, color_s in zip(args.assignments[::2], args.assignments[1::2]):
         color = scale(parse_color(color_s), args.brightness)
         assign.update({port: color for port in parse_ports(ports_s)})
-    dev.send_frame(live_frame(assign, args.leds))
+    with KeepAlive(dev) as ka:
+        ka.show(live_frame(assign, args.leds))
+        hold(args)
 
 
 def cmd_off(dev: Nollie16, args) -> None:
-    dev.send_frame(live_frame({}, args.leds))
+    with KeepAlive(dev) as ka:
+        ka.show(live_frame({}, args.leds))
+        hold(args)
 
 
 def cmd_identify(dev: Nollie16, args) -> None:
     interactive = sys.stdin.isatty() and args.delay is None
-    for port in parse_ports(args.ports):
-        color = scale(IDENTIFY_COLORS[port % len(IDENTIFY_COLORS)], args.brightness)
-        dev.send_frame(live_frame({port: color}, args.leds))
-        print(f"Port {port:2d} (fw ch {p.PORT_TO_CH[port - 1]:2d}) is lit: {fmt_rgb(color)}", flush=True)
-        if interactive:
-            input("  press Enter for the next port...")
-        else:
-            time.sleep(args.delay or 3)
-    dev.send_frame(live_frame({}, args.leds))
+    with KeepAlive(dev) as ka:
+        for port in parse_ports(args.ports):
+            color = scale(IDENTIFY_COLORS[port % len(IDENTIFY_COLORS)], args.brightness)
+            ka.show(live_frame({port: color}, args.leds))
+            print(f"Port {port:2d} (fw ch {p.PORT_TO_CH[port - 1]:2d}) is lit: {fmt_rgb(color)}", flush=True)
+            if interactive:
+                input("  press Enter for the next port...")
+            else:
+                time.sleep(args.delay or 3)
 
 
 def cmd_static(dev: Nollie16, args) -> None:
@@ -152,6 +208,60 @@ def cmd_static(dev: Nollie16, args) -> None:
         CanvasLayout(list(groups.values())),
         [CanvasParams(effect=solid, brightness=args.brightness, color1=c) for c in groups],
     )
+    dev.set_mode(Mode.HARDWARE)
+
+
+_last_progress: list = [None, -1]
+
+
+def _progress(phase: str, done: int, total: int) -> None:
+    """Print each phase's progress in 10 % steps."""
+    pct = 100 * done // max(total, 1) // 10 * 10
+    if [phase, pct] != _last_progress:
+        _last_progress[:] = [phase, pct]
+        end = "\n" if pct >= 100 else ""
+        start = "\n" if pct == 0 and phase != "render" else ""
+        print(f"{start}  {phase} {pct}%" if pct == 0 else f" {pct}%", end=end, flush=True)
+
+
+def cmd_live(dev: Nollie16, args) -> None:
+    prof = profile.load(args.profile)
+    print(f"streaming '{prof.name}' at {prof.fps} fps; Ctrl-C to stop "
+          f"(the device returns to its stored lighting ~3 s after)")
+    engine.run_live(dev, prof, duration=args.duration)
+
+
+def cmd_save(dev: Nollie16, args) -> None:
+    prof = profile.load(args.profile)
+    print(f"saving '{prof.name}' to the device…")
+    print(engine.save_to_device(dev, prof, _progress))
+
+
+def cmd_play(dev: Nollie16, args) -> None:
+    f = Flash(dev)
+    if args.file:
+        data = open(args.file, "rb").read()
+        hdr = fseq.parse_header(data)
+        led_map = f.fseq_led_map() if args.keep_map else _led_map_arg(args.map)
+        if (why := fseq.led_map_matches(hdr, led_map)) is not None:
+            sys.exit(f"channel map doesn't fit the file: {why}")
+        print(f.upload_fseq(data, led_map, _progress))
+    print("playing" if f.play(loop=not args.once) else "device did not start playback")
+
+
+def _led_map_arg(spec: str | None) -> list[int]:
+    """'4:32,9:40' (port:LEDs) -> FSEQ channel map by fw channel."""
+    if not spec:
+        sys.exit("give --map PORT:LEDS,... (or --keep-map) so the device knows how the file maps to ports")
+    led_map = [0] * p.NUM_CHANNELS
+    for item in spec.split(","):
+        port, _, n = item.partition(":")
+        led_map[p.PORT_TO_CH[int(port) - 1]] = int(n)
+    return led_map
+
+
+def cmd_stop(dev: Nollie16, args) -> None:
+    Flash(dev).stop()
     dev.set_mode(Mode.HARDWARE)
 
 
@@ -178,8 +288,11 @@ def main(argv=None) -> None:
     sp = sub.add_parser("set", help="live: set ports to solid colors; unlisted ports turn off",
                         description="e.g.  set all red   |   set 1-4 ff0000 5,6 00ff00")
     sp.add_argument("assignments", nargs="+", metavar="PORTS COLOR")
+    sp.add_argument("--duration", type=float, help="seconds to hold (default: until Ctrl-C)")
     sp.set_defaults(func=cmd_set)
-    sub.add_parser("off", help="live: turn all ports off").set_defaults(func=cmd_off)
+    sp = sub.add_parser("off", help="live: turn all ports off")
+    sp.add_argument("--duration", type=float, help="seconds to hold (default: until Ctrl-C)")
+    sp.set_defaults(func=cmd_off)
     sp = sub.add_parser("identify", help="live: light ports one at a time")
     sp.add_argument("ports", nargs="?", default="all")
     sp.add_argument("--delay", type=float, help="seconds per port (default: wait for Enter)")
@@ -194,7 +307,36 @@ def main(argv=None) -> None:
     sp.add_argument("mode", nargs="?", choices=[m.name.lower() for m in Mode])
     sp.set_defaults(func=cmd_mode)
 
+    sp = sub.add_parser("live", help="stream a profile live (runs until Ctrl-C)")
+    sp.add_argument("profile")
+    sp.add_argument("--duration", type=float, help="stop after this many seconds")
+    sp.set_defaults(func=cmd_live)
+    sp = sub.add_parser("save", help="store a profile on the device (runs with no software)")
+    sp.add_argument("profile")
+    sp.set_defaults(func=cmd_save)
+    sp = sub.add_parser("play", help="play the stored animation, or upload an FSEQ file first")
+    sp.add_argument("file", nargs="?", help="FSEQ v2 file to upload (uncompressed, colors in GRB order)")
+    sp.add_argument("--map", help="PORT:LEDS,... for the file's ranges, e.g. 4:32,5:32,9:40")
+    sp.add_argument("--keep-map", action="store_true", help="reuse the channel map already on the device")
+    sp.add_argument("--once", action="store_true", help="play once instead of looping")
+    sp.set_defaults(func=cmd_play)
+    sub.add_parser("stop", help="stop the stored animation, back to built-in effects").set_defaults(func=cmd_stop)
+
+    # Offline commands (no device needed)
+    sp = sub.add_parser("render", help="render a profile to an FSEQ file (no device needed)")
+    sp.add_argument("profile")
+    sp.add_argument("-o", "--output", required=True)
+    sp.set_defaults(func=cmd_render, offline=True)
+    sp = sub.add_parser("effects", help="list software and hardware effects")
+    sp.set_defaults(func=cmd_effects, offline=True)
+
     args = ap.parse_args(argv)
+    if getattr(args, "offline", False):
+        try:
+            args.func(args)
+        except (ValueError, OSError) as e:
+            sys.exit(str(e))
+        return
     if not 1 <= args.leds <= p.LEDS_PER_CHANNEL:
         ap.error(f"--leds must be 1-{p.LEDS_PER_CHANNEL}")
     if not 0 <= args.brightness <= 100:
@@ -203,7 +345,7 @@ def main(argv=None) -> None:
     try:
         with Nollie16() as dev:
             args.func(dev, args)
-    except (DeviceNotFound, NoResponse) as e:
+    except (DeviceNotFound, NoResponse, ValueError, OSError) as e:
         sys.exit(str(e))
     except KeyboardInterrupt:
         pass
