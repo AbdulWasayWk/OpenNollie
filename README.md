@@ -52,7 +52,7 @@ Use one of the two, not both.
 | Page | What it does |
 |---|---|
 | **Effects studio** | Pick a profile from the dropdown (yours, then the examples) or make one: layers of ports + effect + colors + speed + pattern (in sync / flowing). Watch it on the case preview, *Preview on device* (live), **Save to device** (stored). The last profile you edited reopens next time |
-| **Built-in effects** | The controller's own effects. *Normal lighting*: groups of ports, each with an effect, showing only the settings that effect uses. *Startup animation*: plays once when the PC turns on. Changes apply as you make them |
+| **Built-in effects** | The controller's own effects. *Normal lighting*: groups of ports, each with an effect, showing only the settings that effect uses. *Startup animation*: plays once when the PC turns on. Changes apply as you make them, with each port's color balance |
 | **Ports & LEDs** | Port names, LED counts, *Identify*, *LED test* (find the count), *LED order* (reverse, start LED, presets), *Color balance* (match a device's colors to the others, e.g. a GPU) |
 | **Layout** | The case picture used for previews: add fans and strips, drag them into place, set their port (and which LEDs, for daisy chains), size, angle and name; light one up on the device to find it |
 | **Palettes** | The controller's 8 palette groups (used by palette effects) |
@@ -117,11 +117,13 @@ brightness = 0.7
   `~/.config/opennollie/calibration.toml`. Previews show the intended colors; the balance only changes what is
   sent to a device so that it looks like the preview.
 
-**Color balance:** the controller has no color balance of its own, so OpenNollie adjusts the colors it sends:
-live effects on the fly, and saved profiles when they are written to the controller (static colors and animations
-alike). When you change a balance (or an LED count) later, the profile last saved from OpenNollie is saved again
-automatically so the controller matches. Lighting set up on the *Built-in effects* page is drawn by the controller
-from the colors you pick there, so the balance doesn't apply to it.
+**Color balance:** the controller has no color balance of its own, so OpenNollie adjusts the colors it gives it:
+live effects on the fly, saved profiles when they are written to the controller (static colors and animations alike),
+and built-in effects. The controller draws a built-in effect with one set of colors per group, so a group whose ports
+need different balance (e.g. fans and a GPU) is stored as one controller group per balance, each with adjusted
+colors; the app still shows it as your one group. Rainbows and the palette effect can't be balanced (the controller
+makes those colors itself); the app says so on the group. When you change a balance (or an LED count) later,
+everything OpenNollie put on the controller is updated automatically.
 
 **How "Save to device" stores a profile:** if every layer is `static`, it becomes the controller's built-in
 Solid canvases (instant). Otherwise the whole loop is rendered (frames = the least common multiple of the layers'
@@ -146,7 +148,7 @@ Saving an unchanged profile again skips the write.
 | `~/.config/opennollie/profiles/*.toml` | your profiles |
 | `~/.config/opennollie/layout.json` | the case picture |
 | `~/.config/opennollie/calibration.toml` | color balance per port |
-| `~/.local/state/opennollie/` | the last edited profile, and what was last saved to the controller (to redo it when the balance or LED counts change) |
+| `~/.local/state/opennollie/` | the last edited profile, and what OpenNollie put on the controller (your built-in effect groups, the last saved profile), to update it when the balance or LED counts change |
 
 The controller itself keeps its effects, LED counts, LED orders, port names and the stored animation.
 

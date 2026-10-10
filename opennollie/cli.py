@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from . import calibration, client, engine, fseq, layouts, model, profile
+from . import builtin, calibration, client, engine, fseq, layouts, model, profile
 from . import protocol as p
 from .device import DeviceNotFound, NoResponse, Nollie16
 from .flash import Flash
@@ -361,15 +361,15 @@ def cmd_static(dev: Nollie16, args) -> None:
         port_color.update({port: color for port in parse_ports(ports_s)})
     groups: dict[RGB, list[int]] = {}
     for port, color in port_color.items():
-        groups.setdefault(color, []).append(p.PORT_TO_CH[port - 1])
+        groups.setdefault(color, []).append(port)
     if len(groups) > p.LOOP_CANVAS_MAX:
         sys.exit(f"at most {p.LOOP_CANVAS_MAX} different colors (one canvas each)")
     solid = p.EFFECTS.index("Solid")
-    dev.set_canvases(
-        CanvasLayout(list(groups.values())),
-        [CanvasParams(effect=solid, brightness=args.brightness, color1=c) for c in groups],
-    )
+    _, complete = builtin.write(dev, [builtin.Group(ports, CanvasParams(effect=solid, brightness=args.brightness, color1=c))
+                                      for c, ports in groups.items()], calibration.load())
     dev.set_mode(Mode.HARDWARE)
+    if not complete:
+        print("note: not enough canvases to apply the color balance to every port")
 
 
 _last_progress: list = [None, -1]
@@ -432,7 +432,7 @@ def _update_saved(dev: Nollie16) -> None:
     result = engine.update_saved(dev, _progress)
     end = "\n" if _last_progress[0] else ""
     if result is None:
-        print(end + "the controller isn't holding a profile saved from OpenNollie, so its lighting is unchanged; "
+        print(end + "the controller's lighting wasn't set up in OpenNollie, so it's unchanged; "
               "this applies to effects you start or save from now on")
     else:
         print(end + f"lighting saved on the controller updated: {result}")

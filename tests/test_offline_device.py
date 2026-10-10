@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from opennollie import calibration, cli, client, engine, model, profile
+from opennollie import builtin, calibration, cli, client, engine, model, profile, state
 from opennollie import protocol as p
 from opennollie.device import Nollie16
 from opennollie.flash import FSEQ_BASE
@@ -33,7 +33,7 @@ class Offline(unittest.TestCase):
         self.fake.led = [8] * 16
         self.dev = Nollie16(transport=self.fake)
         patches = [
-            mock.patch.object(engine, "STATE_FILE", self.tmp / "stored.json"),
+            mock.patch.object(state, "STATE_FILE", self.tmp / "stored.json"),
             mock.patch.object(calibration, "PATH", self.tmp / "calibration.toml"),
             mock.patch.object(profile, "USER_PROFILES", self.tmp / "profiles"),
             mock.patch.object(client, "connect", lambda: Nollie16(transport=self.fake)),
@@ -97,18 +97,60 @@ class Offline(unittest.TestCase):
         engine.save_profile(self.dev, profile.loads(self.WHITE))
         self.assertEqual(self.gpu_color(), (128, 255, 255))
         calibration.save({9: (0.15, 0.2, 1.0)})
-        self.assertIn("hardware canvas", engine.update_saved(self.dev))
+        self.assertIn("built-in effects updated", engine.update_saved(self.dev))
         self.assertEqual(self.gpu_color(), (38, 51, 255))
         self.assertEqual(engine.update_saved(self.dev), "already up to date")
 
     def test_update_leaves_other_lighting_alone(self):
         engine.save_profile(self.dev, profile.loads(self.WHITE))
-        self.cli("static", "4,5,9", "red")                 # set up some other way since
+        solid = p.EFFECTS.index("Solid")                   # set up some other way since (e.g. the official app)
+        self.dev.set_canvases(p.CanvasLayout([[p.PORT_TO_CH[pt - 1] for pt in (4, 5, 9)]]),
+                              [p.CanvasParams(effect=solid, color1=(255, 0, 0))])
         calibration.save({9: (0.5, 1.0, 1.0)})
         n = len(self.fake.log)
         self.assertIsNone(engine.update_saved(self.dev))
         self.assertFalse([x for x in self.fake.log[n:] if x[0] == p.Cmd.SET_EFFECT and x[1] != p.EffectItem.MODE])
         self.assertEqual(self.gpu_color(), (255, 0, 0))
+
+    def test_builtin_group_is_split_by_balance_and_shown_as_one(self):
+        calibration.save({9: (0.15, 0.2, 1.0)})
+        breath = p.CanvasParams(effect=p.EFFECTS.index("Breath"), color1=(255, 255, 255), color2=(0, 0, 255))
+        rainbow = p.CanvasParams(effect=p.EFFECTS.index("Rainbow"))
+        groups = [builtin.Group([4, 9, 5], breath, frame_delay=40, palette=2), builtin.Group([6, 7], rainbow)]
+        canvases, complete = builtin.write(self.dev, groups, calibration.load())
+        self.assertTrue(complete)
+        self.assertEqual([c.chans for c in canvases], [[0, 8], [4], [9, 10]])    # GPU (fw ch 4) on its own
+        have = builtin.read(self.dev)
+        self.assertEqual([c.params.color1 for c in have], [(255, 255, 255), (38, 51, 255), rainbow.color1])
+        self.assertEqual(have[1].params.color2, (0, 0, 255))
+        self.assertEqual([c.frame_delay for c in have], [40, 40, 33])
+        self.assertEqual([c.palette for c in have], [2, 2, 0])
+        self.assertEqual(builtin.groups(self.dev, have), groups)                 # the page shows your 2 groups
+        # a balance change rewrites only the GPU group's canvases, and a second update has nothing to do
+        calibration.save({9: (0.5, 0.5, 1.0)})
+        n = len(self.fake.log)
+        self.assertTrue(builtin.update(self.dev))
+        written = [x for x in self.fake.log[n:] if x[0] == p.Cmd.SET_EFFECT and x[1] == p.EffectItem.CANVAS_PARAMS]
+        self.assertEqual(sorted(x[2] for x in written), [0, 1])                 # both canvases of group 1
+        self.assertEqual(builtin.read(self.dev)[1].params.color1, (128, 128, 255))
+        self.assertFalse(builtin.update(self.dev))
+        # changed elsewhere: shown as it is, one group per canvas
+        self.fake.params[0] = bytes([1]) + self.fake.params[0][1:]
+        self.assertEqual(len(builtin.groups(self.dev, builtin.read(self.dev))), 3)
+
+    def test_too_many_canvases_falls_back_to_unsplit_groups(self):
+        gains = {pt: (1.0, 1.0, 0.1 * pt / 16) for pt in range(1, 17)}
+        groups = [builtin.Group([pt], p.CanvasParams()) for pt in range(1, 13)] + [builtin.Group([13, 14, 15, 16],
+                                                                                                p.CanvasParams())]
+        canvases, complete = builtin.expand(groups, gains)
+        self.assertFalse(complete)
+        self.assertEqual(len(canvases), 13)
+        self.assertEqual(canvases[0].params.color1, (0, 255, 0))                  # still balanced (one gain)
+
+    def test_cli_static_is_balanced(self):
+        calibration.save({9: (0.15, 0.2, 1.0)})
+        self.cli("static", "4,5,9", "white")
+        self.assertEqual(self.gpu_color(), (38, 51, 255))
 
     def test_new_balance_updates_saved_animation(self):
         anim = SMALL.replace('ports = "4,5"', 'ports = "4,5,9"')
@@ -131,8 +173,8 @@ class Offline(unittest.TestCase):
         self.assertIn("up to date", self.cli("leds", "4=10"))
 
     def test_old_state_file_still_read(self):
-        engine.STATE_FILE.write_text(json.dumps({self.dev.serial: {"crc": 1, "size": 2, "led_map": [0] * 16}}))
-        self.assertEqual(engine._state(self.dev.serial), {"animation": {"crc": 1, "size": 2, "led_map": [0] * 16}})
+        state.STATE_FILE.write_text(json.dumps({self.dev.serial: {"crc": 1, "size": 2, "led_map": [0] * 16}}))
+        self.assertEqual(state.get(self.dev.serial), {"animation": {"crc": 1, "size": 2, "led_map": [0] * 16}})
         self.assertIsNone(engine.update_saved(self.dev))
 
     # --- CLI ------------------------------------------------------------------------------

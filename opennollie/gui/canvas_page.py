@@ -1,6 +1,7 @@
 """Built-in effects page: the controller's own effects, as groups of ports (the firmware calls them
 canvases). Normal lighting runs all the time; the startup animation plays once at power-on.
-Changes are written to the controller as you make them (only what changed)."""
+Changes are written to the controller as you make them (only what changed), with each port's color
+balance applied (builtin.py)."""
 
 from dataclasses import dataclass, field, replace
 
@@ -8,8 +9,9 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QPushButton, QScrollArea, QSlider, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
+from .. import builtin, calibration
 from .. import protocol as p
-from ..protocol import BootIntro, BootSteady, CanvasLayout, CanvasParams, Mode
+from ..protocol import BootIntro, BootSteady, CanvasParams, Mode
 from .common import ColorButton, Device, PortPicker, error, hbox
 
 FPS_CHOICES = [(8, "Very smooth (120 fps)"), (16, "Smooth (60 fps)"), (33, "Normal (30 fps)"), (50, "20 fps"),
@@ -17,13 +19,7 @@ FPS_CHOICES = [(8, "Very smooth (120 fps)"), (16, "Smooth (60 fps)"), (33, "Norm
 COLOR_NAMES = {"color1": "Color 1", "color2": "Color 2", "color3": "Color 3"}
 
 
-@dataclass
-class GroupState:
-    ports: list[int]
-    params: CanvasParams
-    frame_delay: int = 33
-    palette: int = 0
-    blend: int = 0
+GroupState = builtin.Group
 
 
 @dataclass
@@ -35,7 +31,6 @@ class EffectsState:
     boot_ms: int = 16
     startup_on: bool = True
     builtin_active: bool = True
-    arrays: dict = field(default_factory=dict)       # frame_delay / dynamic_1 / dynamic_2 as on the device
 
 
 def _slider(lo: int, hi: int, value: int) -> tuple[QWidget, QSlider]:
@@ -57,9 +52,9 @@ class GroupCard(QFrame):
     remove = Signal(object)
     ports_changed = Signal()
 
-    def __init__(self, boot: bool, g: GroupState, labels: dict[int, str]):
+    def __init__(self, boot: bool, g: GroupState, labels: dict[int, str], gains: dict):
         super().__init__()
-        self.boot, self.base = boot, g.params
+        self.boot, self.base, self.gains = boot, g.params, gains
         self.setFrameShape(QFrame.StyledPanel)
         lay = QVBoxLayout(self)
 
@@ -80,8 +75,12 @@ class GroupCard(QFrame):
         form = QFormLayout()
         self.picker = PortPicker(labels)
         self.picker.set_ports(g.ports)
-        self.picker.changed.connect(lambda _: (self.ports_changed.emit(), self.changed.emit()))
+        self.picker.changed.connect(lambda _: (self.ports_changed.emit(), self.changed.emit(), self._balance_note()))
         form.addRow("Ports", self.picker)
+        self.no_balance = QLabel("<small>Color balance can't be applied to this effect: the controller makes its "
+                                 "colors itself. Effects with your own colors are balanced.</small>")
+        self.no_balance.setWordWrap(True)
+        form.addRow("", self.no_balance)
         rng = p.PARAM_RANGES
         self.rows: dict[str, QWidget] = {}
         self.sliders: dict[str, QSlider] = {}
@@ -170,8 +169,15 @@ class GroupCard(QFrame):
             self.color_labels[k].setVisible(k in uses and (len(used_colors) > 1 or k != "color1"))
         self._show_row(self.form, self.rows["colors"], bool(used_colors))
         self.more_btn.setVisible(bool(uses & {"delay", "frame_delay", "vmap"}))
+        self._balance_note()
         if emit:
             self.changed.emit()
+
+    def _balance_note(self) -> None:
+        """Say so when a port here has a color balance that this effect can't use."""
+        params = replace(self.base, effect=self.effect.currentIndex())
+        needs = any(self.gains.get(pt) for pt in self.picker.ports())
+        self.no_balance.setVisible(needs and not builtin.balanceable(params, self.boot))
 
     def value(self) -> GroupState:
         s = self.sliders
@@ -188,9 +194,9 @@ class GroupList(QWidget):
 
     changed = Signal()
 
-    def __init__(self, boot: bool, labels: dict[int, str]):
+    def __init__(self, boot: bool, labels: dict[int, str], gains: dict):
         super().__init__()
-        self.boot, self.labels = boot, labels
+        self.boot, self.labels, self.gains = boot, labels, gains
         self.cards: list[GroupCard] = []
         lay = QVBoxLayout(self)
         self.box = QVBoxLayout()
@@ -227,7 +233,7 @@ class GroupList(QWidget):
         limit = p.BOOT_CANVAS_MAX if self.boot else p.LOOP_CANVAS_MAX
         if len(self.cards) >= limit:
             return error(self, "Groups", f"The controller allows at most {limit} groups here.")
-        card = GroupCard(self.boot, g, self.labels)
+        card = GroupCard(self.boot, g, self.labels, self.gains)
         card.remove.connect(self._remove)
         card.ports_changed.connect(self._sync)
         card.changed.connect(self.changed)
@@ -276,11 +282,13 @@ class CanvasPage(QWidget):
         super().__init__()
         self.device = device
         self.labels: dict[int, str] = {}
+        self.gains: dict = {}                          # color balance per port (for the cards' notes)
         self.state: EffectsState | None = None        # what the controller has (last read / written)
         outer = QVBoxLayout(self)
         intro = QLabel(
             "Effects that run <b>on the controller itself</b>. Put ports into <b>groups</b> and give each group an "
-            "effect. Changes show on your fans right away and stay on the controller, even with the PC off.")
+            "effect. Changes show on your fans right away and stay on the controller, even with the PC off. "
+            "Colors are adjusted by each port's color balance (Ports & LEDs).")
         intro.setWordWrap(True)
         outer.addWidget(intro)
 
@@ -298,8 +306,8 @@ class CanvasPage(QWidget):
         self.banner.hide()
 
         self.tabs = QTabWidget()
-        self.loop = GroupList(False, self.labels)
-        self.boot = GroupList(True, self.labels)
+        self.loop = GroupList(False, self.labels, self.gains)
+        self.boot = GroupList(True, self.labels, self.gains)
         self.tabs.addTab(self._scroll(self.loop), "Normal lighting")
         boot_tab = QWidget()
         btl = QVBoxLayout(boot_tab)
@@ -345,22 +353,19 @@ class CanvasPage(QWidget):
 
     def refresh(self) -> None:
         def load(d):
-            fd, d1, d2 = d.frame_delay(), d.dynamic(1), d.dynamic(2)
-            def groups(boot):
-                layout, params = d.canvases(boot)
-                base = p.BOOT_CANVAS_BASE if boot else 0
-                return [GroupState([p.CH_TO_PORT[ch] for ch in chans], prm, fd[base + i] or 33, d1[base + i], d2[base + i])
-                        for i, (chans, prm) in enumerate(zip(layout.canvases, params))]
+            def groups(boot):        # your groups (canvases split for color balance are shown as one)
+                return builtin.groups(d, builtin.read(d, boot), boot)
             intro, steady = d.boot_playlist()
             mode = d.mode()
             boot = groups(True)
             return EffectsState(groups(False), boot, d.frame_ms(False), d.frame_ms(True),
                                 intro == BootIntro.START_CANVAS and bool(boot),   # "on" = something will play
-                                steady == BootSteady.HW_EFFECTS and mode != Mode.FSEQ,
-                                {"frame_delay": fd, "dynamic_1": d1, "dynamic_2": d2})
-        self.device.run(load, self._show)
+                                steady == BootSteady.HW_EFFECTS and mode != Mode.FSEQ), calibration.load()
+        self.device.run(load, lambda r: self._show(*r))
 
-    def _show(self, st: EffectsState) -> None:
+    def _show(self, st: EffectsState, gains: dict) -> None:
+        self.gains.clear()
+        self.gains.update(gains)
         self.state = st
         self.loop.set(st.loop, st.loop_ms)
         self.boot.set(st.boot, st.boot_ms)
@@ -393,7 +398,7 @@ class CanvasPage(QWidget):
     def _wanted(self) -> EffectsState:
         (loop, loop_ms), (boot, boot_ms) = self.loop.value(), self.boot.value()
         cur = self.state
-        return EffectsState(loop, boot, loop_ms, boot_ms, self.startup.isChecked(), cur.builtin_active, cur.arrays)
+        return EffectsState(loop, boot, loop_ms, boot_ms, self.startup.isChecked(), cur.builtin_active)
 
     def _apply(self, activate: bool = False) -> None:
         if self.state is None:
@@ -401,33 +406,14 @@ class CanvasPage(QWidget):
         want, have = self._wanted(), self.state
 
         def write(d):
-            for boot, wg, hg in ((False, want.loop, have.loop), (True, want.boot, have.boot)):
-                base = p.BOOT_CANVAS_BASE if boot else 0
-                wl = [[p.PORT_TO_CH[pt - 1] for pt in g.ports] for g in wg]
-                hl = [[p.PORT_TO_CH[pt - 1] for pt in g.ports] for g in hg]
-                if wl != hl:                       # groups or their ports changed: rewrite this whole set
-                    d.set_canvases(CanvasLayout(wl), [g.params for g in wg], boot=boot)
-                else:                              # only settings changed: just those groups
-                    for i, (a, b) in enumerate(zip(wg, hg)):
-                        if a.params != b.params:
-                            d.set_canvas_params(base + i, replace(a.params, ch_count=len(a.ports)))
+            gains = calibration.load()
+            complete = True
+            for boot, groups in ((False, want.loop), (True, want.boot)):
+                complete &= builtin.write(d, groups, gains, boot)[1]
             if want.loop_ms != have.loop_ms:
                 d.set_frame_ms(want.loop_ms, boot=False)
             if want.boot_ms != have.boot_ms:
                 d.set_frame_ms(want.boot_ms, boot=True)
-            arrays = {k: list(v) for k, v in have.arrays.items()}
-            for boot, groups in ((False, want.loop), (True, want.boot)):
-                base = p.BOOT_CANVAS_BASE if boot else 0
-                for i, g in enumerate(groups):
-                    arrays["frame_delay"][base + i] = g.frame_delay
-                    arrays["dynamic_1"][base + i] = g.palette
-                    arrays["dynamic_2"][base + i] = g.blend
-            if arrays["frame_delay"] != list(have.arrays["frame_delay"]):
-                d.set_frame_delay(arrays["frame_delay"])
-            if arrays["dynamic_1"] != list(have.arrays["dynamic_1"]):
-                d.set_dynamic(1, arrays["dynamic_1"])
-            if arrays["dynamic_2"] != list(have.arrays["dynamic_2"]):
-                d.set_dynamic(2, arrays["dynamic_2"])
             intro = BootIntro.START_CANVAS if want.startup_on and want.boot else BootIntro.NONE
             active = want.builtin_active or activate
             current_steady = d.boot_playlist()[1]
@@ -436,12 +422,13 @@ class CanvasPage(QWidget):
                 d.set_boot_playlist(intro, steady)
             if active:
                 d.set_mode(Mode.HARDWARE)          # also stops a stored animation instantly
-            return replace(want, builtin_active=active, arrays=arrays)
+            return replace(want, builtin_active=active), complete
 
-        def done(new_state: EffectsState) -> None:
-            self.state = new_state
-            self.banner.setVisible(not new_state.builtin_active)
-            self.status.setText("✓ Saved on the controller")
+        def done(result) -> None:
+            self.state, complete = result
+            self.banner.setVisible(not self.state.builtin_active)
+            self.status.setText("✓ Saved on the controller" + ("" if complete else
+                                " (too many groups to split for color balance: some ports aren't balanced)"))
 
         self.device.run(write, done, lambda e: (self.status.setText(""), error(self, "Built-in effects", e)))
 

@@ -97,7 +97,7 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 | App page | Features | Status |
 |---|---|---|
 | Home / Basic settings | controller name; fw version; boot playlist; direct-drive idle timeout; (GPIO: not on 16CH) | [x] GUI Device page + CLI |
-| Loop canvas / Boot canvas | canvases, ports per canvas, per-canvas effect + params (incl. palette group, blend, frame delay), loop/start FPS | [x] Built-in effects page reworked (2026-10-11): "groups", tabs Normal lighting / Startup animation, only the settings each effect uses (`protocol.EFFECT_PARAMS`), applies as you edit (diff-only writes). Tested vs the simulated controller; [ ] boot canvases not yet hw-tested |
+| Loop canvas / Boot canvas | canvases, ports per canvas, per-canvas effect + params (incl. palette group, blend, frame delay), loop/start FPS | [x] Built-in effects page reworked (2026-10-11): "groups", tabs Normal lighting / Startup animation, only the settings each effect uses (`protocol.EFFECT_PARAMS`), applies as you edit (diff-only writes), color balance per port (`builtin.py`). Tested vs the simulated controller; [ ] boot canvases not yet hw-tested; [ ] user to check a split group (fans + GPU, Breath) stays in step |
 | LED settings | LED count per port, names | [x] |
 | LED settings | LED order remap (vmap), component/vmap presets | [x] `layouts.py`, Ports page "LED order", CLI `order`; our engine applies the order to live/stored effects itself (fw only applies it to built-in effects with vmap_process) |
 | LED settings | auto-detect LED count | N/A on 16CH (fw lacks it); our `ledtest` replaces it |
@@ -123,7 +123,9 @@ opennollie/
   effects.py     # software effects: f(t, position) -> RGB, all periodic
   profile.py     # TOML profiles (layers, groups); user dir + examples (opennollie/examples/)
   engine.py      # Renderer, prepare() (LED counts/orders + color balance), live loop, render→FSEQ, save_profile,
-                 # update_saved (redo the last save after a balance / LED count change)
+                 # update_saved (redo what's stored after a balance / LED count change)
+  builtin.py     # built-in effect groups ↔ canvases with color balance (split per balance, remembered)
+  state.py       # what OpenNollie stored per controller (~/.local/state/opennollie/stored.json)
   layouts.py     # LED order (vmap) + SignalRGB/Nollie layout presets
   calibration.py # per-port color balance (PC side)
   caselayout.py  # the case picture (PC side)
@@ -325,6 +327,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
   Terminal-panel tool get lost while fish starts up, so the user runs them by hand.
 
 ## Decision log
+- 2026-10-11: **Built-in effects get the color balance too** (user request). The firmware draws one color set per
+  canvas, so a group whose ports have different balance is written as one canvas per balance with adjusted colors
+  1–3 (`builtin.expand`); the user's groups are remembered (state "loop"/"boot") and shown while the controller still
+  has exactly what was written, else canvases show 1:1. A changed group's canvases are always written together (to
+  keep them in step). Rainbows / ColorFromPalette can't be balanced (firmware colors; the card says so). If the split
+  would exceed the canvas limit (14 loop / 2 boot), groups aren't split. Static profiles and CLI `static` use the
+  same path. Not done: balanced palette copies for ColorFromPalette (would take palette slots the user owns).
 - 2026-10-11: Color balance stays PC-side and is applied when sending/saving (the firmware has none). OpenNollie
   remembers the last profile it saved per controller (`stored.json` "saved") and **re-saves it when the balance or
   LED counts change** (`engine.update_saved`: Ports page balance Save / Apply, CLI `balance` / `leds`), but only if

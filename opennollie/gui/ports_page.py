@@ -269,8 +269,9 @@ class ColorBalanceDialog(QDialog):
             form.addRow(name, hbox(sl, value, stretch=False))
             self.sliders.append(sl)
         note = QLabel("<small>The controller has no color balance of its own, so OpenNollie adjusts the colors it "
-                      "sends: live effects, and what you save to the controller from the Effects studio. "
-                      "<b>Save</b> also updates the effect saved on the controller.</small>")
+                      "gives it: live effects, profiles saved to the controller, and built-in effects (except "
+                      "rainbows and palettes, which the controller colors itself). <b>Save</b> also updates what's "
+                      "on the controller now.</small>")
         note.setWordWrap(True)
         form.addRow(note)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Reset | QDialogButtonBox.Cancel)
@@ -416,7 +417,7 @@ class PortsPage(QWidget):
         def done(updated):
             msg = "Ports saved to the controller"
             if updated and updated != engine.UP_TO_DATE:
-                msg += f"; the effect saved on the controller was updated for the new LED counts ({updated})"
+                msg += f"; the lighting on the controller was updated for the new LED counts ({updated})"
             self.device.status.emit(msg)
             self.labels_changed.emit(self.labels())
         self.device.run(write, done, lambda e: error(self, "Ports", e))
@@ -444,13 +445,13 @@ class PortsPage(QWidget):
 
     def _update_saved(self) -> None:
         """The balance is baked into what's saved on the controller: store that again with the new one."""
-        self.device.status.emit("Color balance saved; updating the effect saved on the controller…")
+        self.device.status.emit("Color balance saved; updating the lighting on the controller…")
         def done(result):
             self.device.status.emit(
-                "Color balance saved; the effect on the controller already matches" if result == engine.UP_TO_DATE else
-                f"Color balance saved and the effect on the controller updated ({result})" if result else
-                "Color balance saved. The controller isn't holding an effect saved from the Effects studio, so it "
-                "applies the next time you save one.")
+                "Color balance saved; the lighting on the controller already matches" if result == engine.UP_TO_DATE
+                else f"Color balance saved and the lighting on the controller updated ({result})" if result else
+                "Color balance saved. The controller's lighting wasn't set up in OpenNollie, so it applies the next "
+                "time you save a profile or change built-in effects.")
         self.device.run(engine.update_saved, done, lambda e: error(self, "Color balance", e))
 
     def _order(self, port: int) -> None:
