@@ -12,6 +12,7 @@ from .common import Device
 from .device_page import DevicePage
 from .palette_page import PalettePage
 from .ports_page import PortsPage
+from .settings_page import SettingsPage
 from .studio_page import StudioPage
 
 
@@ -27,7 +28,7 @@ class MainWindow(QMainWindow):
         self.studio = StudioPage(self.device, self.ports.led_counts, self.ports.orders)
         self.canvases = CanvasPage(self.device)
         pages = [self.studio, self.canvases, self.ports, PalettePage(self.device), AnimationPage(self.device),
-                 DevicePage(self.device)]
+                 DevicePage(self.device), SettingsPage(self.device)]
         self.ports.labels_changed.connect(self.studio.set_labels)
         self.ports.labels_changed.connect(self.canvases.set_labels)
 
