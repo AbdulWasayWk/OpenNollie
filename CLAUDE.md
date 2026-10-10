@@ -141,8 +141,12 @@ One action per capture, about 3 s between steps:
 
 ## Open questions
 - **Firmware: our Nollie runs LEGACY firmware (`Nollie16_old`, 3061:4716).** App v2.3.0 forces an OTA update for
-  legacy devices and only supports save-to-device / effects / FSEQ on the current firmware (16D5:2A16). Which app
-  version is in the user's VM, and does it support the old firmware? Should the user update via the official app?
+  legacy devices and only supports save-to-device / effects / FSEQ on the current firmware (16D5:2A16). The VM has
+  NollieRGB **1.0** (old app). Recommended: update via the official v2.3.0 app in the VM, never from our tool.
+  OTA flow: app → `0xFD` jump-BL → device re-enumerates as **3061:f037** (bootloader) → PROM + VERIFY (CRC) → reboot
+  as **16d5:2a16**. A CRC failure leaves it in the bootloader, and the app can re-flash it (recoverable).
+  The VM (`win10`, libvirt) passes through by ID 3061:4716 only, so run `tools/vm-follow-nollie.sh` during the update
+  to hot-attach the new IDs.
 - LED count per device? Not needed yet: we drive 256 LEDs/port and the extra data is ignored.
 - Windows app name and version? Is it .NET or Electron, i.e. can it be decompiled?
 - Which effects can the firmware store? Can it store custom or keyframe animations, or only
@@ -176,6 +180,8 @@ One action per capture, about 3 s between steps:
 
 ## Decision log
 <!-- Newest first. Format: YYYY-MM-DD: decision; reason -->
+- 2026-10-10: OpenNollie will **not** implement firmware updates; it's left to the official app. Reasons: brick risk
+  from our own bugs, the firmware binary can't be redistributed, and it's a one-time operation.
 - 2026-10-10: Python + hidapi + PySide6; fast iteration during RE, light enough CPU use, Qt fits CachyOS/KDE.
 - 2026-10-10: Sniff USB on the host via usbmon rather than USBPcap in Windows; libvirt passthrough traffic is visible on the host.
 - 2026-10-10: Use OpenRGB's Nollie driver as the reference for the live protocol; reverse engineer only save-to-device and hardware effects.
