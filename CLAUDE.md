@@ -160,9 +160,12 @@ The app is **done** when every item below is checked. Keep this list current; it
       (not bundled); 237/238 vendor files load (1 vendor file is internally inconsistent and rejected, as in the app)
 
 **Polish**
-- [ ] Tray icon with quick profile switching (live / save to device)
-- [ ] README: install, CLI and GUI usage, profile format, limitations (a short stub exists)
-- [ ] Arch PKGBUILD (installs the package, udev rule, systemd user unit, desktop entry)
+- [x] Tray icon (`opennollie-tray`, `gui/tray.py`): run live / save to device per profile, stop, open app; autostart at
+      login via the installer. Live start/stop through the daemon verified; it's running on the user's desktop
+- [x] README: install, GUI pages, tray, CLI, profile format, save-to-device, limits, troubleshooting, development
+- [~] Arch PKGBUILD (`packaging/PKGBUILD` + `opennollie.install`; pyproject wheel verified via setuptools).
+      [ ] Test `makepkg` (needs `python-build python-installer`, user installs with sudo); don't install it on top
+      of the user install
 
 **Known limits (not to-dos):** GPU smooths per-LED patterns (its own controller reads 6 values); a stored setup is
 either built-in canvases or one animation; no LED auto-detect or power test on 16CH firmware.
@@ -224,7 +227,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [ ] Restore from backup JSON; LED-order (vmap) editor + component presets; tray icon / quick profile switch
 
 ### Phase 6: Packaging
-- [ ] PKGBUILD, udev rule, systemd unit, README
+- [x] pyproject.toml (commands: opennollie, opennollie-daemon, opennollie-gui, opennollie-tray), examples as package data
+- [~] PKGBUILD written; build test pending. README done. User install via tools/install-user.sh (incl. tray autostart)
 
 ## Open questions
 - What's on interface 1 (keyboard, 8 B IN)? Probably irrelevant.
@@ -232,6 +236,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: The Bash tool kills background children when a command ends, so start GUI/tray processes for the user
+  with `systemd-run --user …` (the user manager has WAYLAND_DISPLAY etc.). No pip on the system: build wheels with
+  `setuptools.build_meta` directly. (source: this session)
 - 2026-10-11: **LED order (vmap) semantics** (app `led_layout.py`): `index[i]` = physical LED at logical position i; lit LEDs
   first, then zLEDs (dark). The firmware applies it only to built-in effects (canvas `vmap_process`); **live frames are
   physical** (the app's preview chase writes `order[pos]` itself), so our Renderer maps logical→physical. Component
