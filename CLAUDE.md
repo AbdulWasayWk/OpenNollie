@@ -133,6 +133,34 @@ docs/PROTOCOL.md
 Saved lighting has two layers: **(a)** built-in HW effects on canvases (cheap, firmware-rendered), and
 **(b)** custom effects from our engine, rendered to FSEQ and stored in flash, which plays with no host.
 
+## Definition of done (release checklist)
+
+The app is **done** when every item below is checked. Keep this list current; it's the single to-do list.
+
+**Verification**
+- [ ] User has tested the GUI on the real desktop (KDE/Breeze), every page; reported issues fixed
+- [ ] Boot canvases (14+) tested on hardware: apply → power cycle → plays once at power-on
+- [ ] Factory reset run from our app (GUI) and the result verified
+- [ ] Palettes page: write from the GUI verified on hardware (reads/writes already round-trip in `hw_roundtrip`)
+
+**Installation**
+- [ ] `tools/install-user.sh` run (with the user's OK): `opennollie` / `opennollie-gui` on PATH, app-menu entry,
+      daemon as a systemd user service started at login; verified after a re-login/reboot
+
+**Missing features (parity with NollieRGB 2.3.0)**
+- [ ] Restore settings from a backup JSON (GUI + CLI)
+- [ ] LED order editor (vmap / LED index: reverse, start offset), GUI + CLI
+- [ ] Component presets from the vendor's `Components/*.json` / `vmap/*.json` formats (user-supplied files, not
+      bundled, since they're the vendor's)
+
+**Polish**
+- [ ] Tray icon with quick profile switching (live / save to device)
+- [ ] README: install, CLI and GUI usage, profile format, limitations
+- [ ] Arch PKGBUILD (installs the package, udev rule, systemd user unit, desktop entry)
+
+**Known limits (not to-dos):** GPU smooths per-LED patterns (its own controller reads 6 values); a stored setup is
+either built-in canvases or one animation; no LED auto-detect or power test on 16CH firmware.
+
 ## Roadmap & status
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done
