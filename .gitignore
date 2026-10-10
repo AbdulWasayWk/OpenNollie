@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.venv/
+# Raw USB captures can be large; keep them local unless explicitly added.
+captures/*.pcap*
