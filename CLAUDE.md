@@ -226,7 +226,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] User test on the real desktop (basic functionality OK)
 - [x] Studio: profile dropdown (your profiles + examples), Save as by name into ~/.config/opennollie/profiles, Delete,
       Save/Discard/Cancel on unsaved changes, examples read-only; autosave + reopen last session (user requests)
-- [ ] Restore from backup JSON; LED-order (vmap) editor + component presets; tray icon / quick profile switch
+- [x] Restore from backup JSON; LED-order (vmap) editor + component presets; tray icon / quick profile switch
+- [x] Settings page: tray / service start at login (`autostart.py`) (user request 2026-10-11)
+- [x] Editable case layout (`caselayout.py`, `~/.config/opennollie/layout.json`, GUI Layout page): fans/strips,
+      drag to arrange, port + first LED + LED count per item (daisy chains), size/angle/name, light-it-up; studio
+      preview uses it. The previously hard-coded layout of this machine was migrated into the user's layout.json
 
 ### Phase 6: Packaging
 - [x] pyproject.toml (commands: opennollie, opennollie-daemon, opennollie-gui, opennollie-tray), examples as package data

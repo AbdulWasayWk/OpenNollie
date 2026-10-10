@@ -328,7 +328,7 @@ class StudioPage(QWidget):
     icon = "applications-graphics"
     progress = Signal(str, int, int)
 
-    def __init__(self, device: Device, led_counts, orders=lambda: {}):
+    def __init__(self, device: Device, led_counts, orders=lambda: {}, layout_store=None):
         super().__init__()
         self.device = device
         self.led_counts = led_counts          # callable -> {port: count} (from the Ports page)
@@ -396,6 +396,9 @@ class StudioPage(QWidget):
         rl = QVBoxLayout(right)
         rl.setContentsMargins(0, 0, 0, 0)
         self.view = CaseView()
+        if layout_store is not None:
+            self.view.set_layout(layout_store.layout)
+            layout_store.changed.connect(lambda: self.view.set_layout(layout_store.layout))
         rl.addWidget(self.view, 1)
         self.note = QLabel()
         self.note.setWordWrap(True)
@@ -548,6 +551,7 @@ class StudioPage(QWidget):
     def set_labels(self, labels: dict[int, str]) -> None:
         """Called when the Ports page (re)loads: port names and LED counts may have changed."""
         self.view.labels = labels
+        self.view.led_counts = self.led_counts()
         self.editor.picker.set_labels(labels)
         self._rebuild()
 

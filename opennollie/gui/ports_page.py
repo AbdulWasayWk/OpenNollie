@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 
 from .. import calibration, client, layouts
 from .. import protocol as p
-from .caseview import CASE_LAYOUT
 from .common import Device, error, hbox
 
 RGB = tuple[int, int, int]
@@ -328,7 +327,7 @@ class PortsPage(QWidget):
             self.table.setCellWidget(row, 0, item)
             self.names[port] = QLineEdit()
             self.names[port].setMaxLength(p.NAME_MAX_CHARS)
-            self.names[port].setPlaceholderText(CASE_LAYOUT.get(port, ("", 0, 0, "not connected?"))[3])
+            self.names[port].setPlaceholderText("e.g. Rear exhaust fan")
             self.table.setCellWidget(row, 1, self.names[port])
             self.counts[port] = QSpinBox()
             self.counts[port].setRange(0, p.LEDS_PER_CHANNEL)

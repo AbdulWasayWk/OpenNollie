@@ -12,6 +12,7 @@ from .common import Device
 from .device_page import DevicePage
 from .palette_page import PalettePage
 from .ports_page import PortsPage
+from .layout_page import LayoutPage, LayoutStore
 from .settings_page import SettingsPage
 from .studio_page import StudioPage
 
@@ -24,11 +25,15 @@ class MainWindow(QMainWindow):
         self.device = Device()
         self.device.status.connect(lambda msg: self.statusBar().showMessage(msg, 0 if msg.startswith("Error") else 8000))
 
+        self.layout_store = LayoutStore()
         self.ports = PortsPage(self.device)
-        self.studio = StudioPage(self.device, self.ports.led_counts, self.ports.orders)
+        self.studio = StudioPage(self.device, self.ports.led_counts, self.ports.orders, self.layout_store)
+        layout_page = LayoutPage(self.device, self.layout_store, self.ports.led_counts, self.ports.labels)
         self.canvases = CanvasPage(self.device)
-        pages = [self.studio, self.canvases, self.ports, PalettePage(self.device), AnimationPage(self.device),
-                 DevicePage(self.device), SettingsPage(self.device)]
+        pages = [self.studio, self.canvases, self.ports, layout_page, PalettePage(self.device),
+                 AnimationPage(self.device), DevicePage(self.device), SettingsPage(self.device)]
+        # first run: start the case picture from the connected ports once their LED counts are known
+        self.ports.labels_changed.connect(lambda _: self.layout_store.ensure(self.ports.led_counts()))
         self.ports.labels_changed.connect(self.studio.set_labels)
         self.ports.labels_changed.connect(self.canvases.set_labels)
 
