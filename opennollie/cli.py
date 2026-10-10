@@ -373,7 +373,8 @@ def cmd_live(dev: Nollie16, args) -> None:
     if not args.profile:
         sys.exit("usage: live PROFILE | live --stop | live --status")
     if daemon and args.duration is None:
-        name = daemon.call("live_start", profile=open(args.profile).read(), source=args.profile)["name"]
+        path = profile.find(args.profile)
+        name = daemon.call("live_start", profile=path.read_text(), source=str(path))["name"]
         print(f"'{name}' is running in the daemon; stop it with: opennollie live --stop")
         return
     prof = load_profile(dev, args.profile)
@@ -498,7 +499,7 @@ def main(argv=None) -> None:
     sp.set_defaults(func=cmd_mode)
 
     sp = sub.add_parser("live", help="run a profile live (in the daemon if it's running, else until Ctrl-C)")
-    sp.add_argument("profile", nargs="?")
+    sp.add_argument("profile", nargs="?", help="a profile file, or a name (see `opennollie profiles`)")
     sp.add_argument("--stop", action="store_true", help="stop the daemon's live effect")
     sp.add_argument("--status", action="store_true", help="show the daemon's live effect")
     sp.add_argument("--duration", type=float, help="stop after this many seconds")
@@ -519,6 +520,9 @@ def main(argv=None) -> None:
     sp.add_argument("profile")
     sp.add_argument("-o", "--output", required=True)
     sp.set_defaults(func=cmd_render, offline=True)
+    sp = sub.add_parser("profiles", help="list your profiles and the examples")
+    sp.set_defaults(func=lambda args: print("\n".join(
+        f"{f.stem:<22} {f.parent}" for f in profile.available())), offline=True)
     sp = sub.add_parser("effects", help="list software and hardware effects")
     sp.set_defaults(func=cmd_effects, offline=True)
 

@@ -235,7 +235,7 @@ class Server:
         path = cfg.get("live_profile")
         if path:
             try:
-                self.live.start(Path(path).expanduser().read_text(), str(path))
+                self.live.start(profile.find(path).read_text(), str(path))
             except Exception as e:
                 log.error("autostart of %s failed: %s", path, e)
 

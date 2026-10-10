@@ -18,8 +18,7 @@ from ..profile import Layer, Profile
 from .caseview import CaseView
 from .common import ColorButton, Device, PortPicker, error, hbox, hexcolor
 
-USER_PROFILES = Path.home() / ".config" / "opennollie" / "profiles"
-EXAMPLE_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
+from ..profile import EXAMPLE_PROFILES, USER_PROFILES
 
 # Quick port selections for this machine (see CLAUDE.md); order = travel order.
 QUICK_GROUPS = {

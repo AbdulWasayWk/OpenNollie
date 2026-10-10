@@ -34,6 +34,8 @@ from . import protocol as p
 from .effects import EFFECTS, EffectSpec, parse_color
 
 USED_PORTS_DEFAULT = list(range(1, p.NUM_CHANNELS + 1))
+USER_PROFILES = Path.home() / ".config" / "opennollie" / "profiles"
+EXAMPLE_PROFILES = Path(__file__).resolve().parent / "examples"
 LAYER_KEYS = {"ports", "effect", "colors", "color", "period", "spread", "brightness", "reverse",
               "interp", "unit", "span"}
 
@@ -256,8 +258,31 @@ def save(prof: Profile, path: str | Path) -> None:
     Path(path).write_text(dumps(prof))
 
 
+def find(name: str | Path) -> Path:
+    """A profile path from a path, or a name looked up in the user's profiles, then the examples."""
+    path = Path(name).expanduser()
+    if path.exists():
+        return path
+    for d in (USER_PROFILES, EXAMPLE_PROFILES):
+        for cand in (d / str(name), d / f"{name}.toml"):
+            if cand.is_file():
+                return cand
+    raise FileNotFoundError(f"no profile {str(name)!r} (looked in {USER_PROFILES} and the examples)")
+
+
+def available() -> list[Path]:
+    """User profiles, then examples (user ones shadow examples with the same file name)."""
+    seen, out = set(), []
+    for d in (USER_PROFILES, EXAMPLE_PROFILES):
+        for f in sorted(d.glob("*.toml")) if d.is_dir() else []:
+            if f.name not in seen:
+                seen.add(f.name)
+                out.append(f)
+    return out
+
+
 def load(path: str | Path) -> Profile:
-    with open(path, "rb") as f:
+    with open(find(path), "rb") as f:
         return from_dict(tomllib.load(f))
 
 

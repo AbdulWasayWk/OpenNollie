@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opennollie"
+version = "0.1.0"
+description = "Linux app for the Nollie 16CH RGB controller: per-port colors, custom effects, save-to-device"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["hidapi", "PySide6"]
+keywords = ["rgb", "argb", "nollie", "led", "openrgb"]
+classifiers = ["Operating System :: POSIX :: Linux", "Topic :: System :: Hardware"]
+
+[project.urls]
+Homepage = "https://github.com/AbdulWasayWk/OpenNollie"
+
+[project.scripts]
+opennollie = "opennollie.cli:main"
+opennollie-daemon = "opennollie.daemon:main"
+
+[project.gui-scripts]
+opennollie-gui = "opennollie.gui.app:main"
+opennollie-tray = "opennollie.gui.tray:main"
+
+[tool.setuptools.packages.find]
+include = ["opennollie*"]
+
+[tool.setuptools.package-data]
+"opennollie.examples" = ["*.toml", "*.md"]

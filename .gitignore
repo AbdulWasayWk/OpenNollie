@@ -6,3 +6,8 @@ captures/*.pcap*
 
 # Official vendor app (proprietary): local analysis only, never commit.
 vendor-app/
+
+# Python build output
+build/
+dist/
+*.egg-info/

@@ -75,7 +75,7 @@ class Profiles(unittest.TestCase):
     def test_toml_round_trip(self):
         import glob
         from opennollie import profile
-        for path in glob.glob("profiles/*.toml"):
+        for path in glob.glob("opennollie/examples/*.toml"):
             a = profile.load(path)
             self.assertEqual(profile.to_dict(profile.loads(profile.dumps(a))), profile.to_dict(a), path)
 
