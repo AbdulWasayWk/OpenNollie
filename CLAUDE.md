@@ -101,13 +101,13 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 | LED settings | LED count per port, names | [x] |
 | LED settings | LED order remap (vmap), component/vmap presets | [x] `layouts.py`, Ports page "LED order", CLI `order`; our engine applies the order to live/stored effects itself (fw only applies it to built-in effects with vmap_process) |
 | LED settings | auto-detect LED count | N/A on 16CH (fw lacks it); our `ledtest` replaces it |
-| Palette editor | 8 groups × 16 colors; import/export JSON | [x] (palette write verified; GUI not user-tested) |
+| Palette editor | 8 groups × 16 colors; import/export JSON | [x] (palette write verified; GUI palette write not hw-checked) |
 | FSEQ player | upload FSEQ (erase/write/verify), channel map, play/stop/loop | [x] verified on hw |
 | Device info | power (V/I/temp/load), flash chip, write count, stored FSEQ size | [x] |
 | Backup | export/restore config JSON, factory reset, restart | [x] export, restore, restart verified; factory reset not run from our app |
 | Power test | | N/A on 16CH |
 | Identify | light one port | [x] |
-| **OpenNollie extras** | live per-port colors; software effects engine (10 effects + custom keyframes), live or stored as FSEQ; profiles; daemon; GUI studio with case preview | [x] verified on hw (GUI pending user test) |
+| **OpenNollie extras** | live per-port colors; software effects engine (10 effects + custom keyframes), live or stored as FSEQ; profiles + dropdown; daemon; tray; studio with editable case picture; per-port color balance; start-at-login switches | [x] verified on hw and by the user |
 
 ## Architecture (decided)
 
@@ -120,11 +120,18 @@ opennollie/
   model.py       # DeviceConfig dataclasses mirroring the device state; read_all / diff / write
   flash.py       # F4 flash ops + FSEQ upload/verify (mirrors app n_usb_flash_mixin / fseq_upload_service)
   fseq.py        # FSEQ v2 reader/writer
-  effects/       # software effects: f(t, channel ctx) -> colors; also rendered to FSEQ
-  engine.py      # live frame loop (OL mode)
-  daemon.py      # systemd --user service owning the device; local API for GUI/CLI
+  effects.py     # software effects: f(t, position) -> RGB, all periodic
+  profile.py     # TOML profiles (layers, groups); user dir + examples (opennollie/examples/)
+  engine.py      # Renderer, prepare() (LED counts/orders + color balance), live loop, render→FSEQ, save_to_device
+  layouts.py     # LED order (vmap) + SignalRGB/Nollie layout presets
+  calibration.py # per-port color balance (PC side)
+  caselayout.py  # the case picture (PC side)
+  autostart.py   # tray / service at login
+  daemon.py      # systemd --user service owning the device; local API for GUI/CLI; hosts live effects
+  client.py      # connect() → daemon if running, else USB
   cli.py         # `opennollie …`
-  gui/           # Qt app with the pages above
+  gui/           # Qt app (pages: studio, built-in effects, ports, layout, palettes, animation, device, settings) + tray
+tests/           # unit tests, fakedevice.py (simulated controller), test_offline_device.py (end to end), hw_roundtrip.py
 packaging/       # 70-opennollie.rules, opennollie.service, PKGBUILD
 tools/           # setup-dev.sh, capture.sh, vm-follow-nollie.sh, re/ (pyi_extract.py, disasm.py)
 captures/        # .pcapng from RE sessions (gitignored)
@@ -194,18 +201,18 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Writes verified on hardware: canvas params (readback + visual), loop canvas layout via `static`, mode
 - [x] Setters round-trip verified (`python3 -m tests.hw_roundtrip`, 12/12): LED/zLED counts, palette, loop/boot
       frame ms, boot playlist, idle, vmap name, dynamic 1/2, frame delay, name. Reboot verified.
-- [ ] Not yet exercised: boot canvases (14+), LED index write, factory reset (user did one via the app)
-- [~] Live streaming (OL) + identify: single frames verified; needs a keep-alive loop (3 s fallback)
+- [x] LED index write verified (restore + `order` round trips). [ ] Not yet on hw: boot canvases (14+), factory reset
+- [x] Live streaming (OL) + identify with keep-alive (engine loop, KeepAlive, LiveSession)
 - [x] Voltage/power + flash info (`power`). LED-count detection and power test: **N/A on the 16CH** (fw lacks them)
 - [x] Flash ops + FSEQ writer/upload/play + boot-loop persistence, verified on hardware (GRB storage!)
-- [ ] Backup/restore JSON (compatible with the app's export format if practical), factory reset, reboot
+- [x] Backup/restore JSON (our own format; diff-based restore), reboot. Factory reset implemented, not run from our app
 
 ### Phase 4: Effects engine + headless product
 - [x] `effects.py`: static, gradient, breathe, cycle, rainbow, wave, comet, blink, flicker, **keyframes** (user-defined);
       all periodic (seamless loops); `unit` port/led, `span` port/group, port order = travel order
-- [x] `profile.py`: TOML profiles with groups, per-port LED counts, layers (later wins), `hw:<firmware effect>`
+- [x] `profile.py`: TOML profiles with groups, per-port LED counts, layers (later wins). (`hw:` layers removed 2026-10-11)
 - [x] `engine.py`: Renderer, loop length = LCM of periods (≤ 120 s), live streaming, render→FSEQ, `save_to_device`
-      (all static/hw → canvases; otherwise FSEQ + boot loop). CLI: `live`, `save`, `render`, `play`, `stop`, `effects`
+      (all static → Solid canvases; otherwise FSEQ + boot loop). CLI: `live`, `save`, `render`, `play`, `stop`, `effects`
 - [x] Verified on hardware: `live profiles/airflow-rainbow.toml` (user confirmed), `save` same profile (3.9 s,
       plays from the device, boot playlist FSEQ loop)
 - [x] Daemon (`opennollie/daemon.py`): owns the device (auto-reconnect), forwards raw packets for clients
@@ -213,12 +220,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
       pauses them while a client drives LEDs, autostart via `~/.config/opennollie/daemon.toml: live_profile`.
       Verified: CLI via daemon, live in daemon, pause/resume, controller reboot → reconnect, clean SIGTERM.
 - [x] systemd user unit + install script (installed 2026-10-11, survives reboot)
-- [ ] Backup/restore of the device config (JSON)
+- [x] Backup/restore of the device config (JSON)
 
 ### Phase 5: GUI (PySide6) — `python3 -m opennollie.gui`
 - [x] `gui/app.py` main window; `common.py` (Device: one background thread for all device calls, reconnects;
       ColorButton, PortPicker); `caseview.py` (schematic of this case, animated LEDs)
-- [x] Pages: Effects studio (layers, all effects incl. built-in, keyframe timeline, live case preview, preview on
+- [x] Pages: Effects studio (layers, software effects, keyframe timeline, live case preview, preview on
       device, save to device, open/save TOML), Built-in effects (loop/boot canvases), Ports & LEDs (names, counts,
       identify, LED test dialog), Palettes (+ import/export), Stored animation (status, play/stop, FSEQ upload),
       Device (name, power, startup playlist, idle fallback, backup JSON, restart, factory reset)
@@ -244,6 +251,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: **User's GPU color balance: red 15 %, green 20 %, blue 100 %** (`calibration.toml`, port 9). The user
+  confirms these are the values that make the GPU match the fans; it's only slightly dimmer, which is fine. Previews
+  show intended colors (balance applies only to device output). (source: user)
 - 2026-10-11: **GPU color balance differs**: same data, same timing, but its blue is weaker (cyan → greener, purple →
   pinker, white → yellowish), so a rainbow looks "ahead" on the GPU. Fixed with per-port color balance
   (`calibration.py`, `~/.config/opennollie/calibration.toml`; GUI Ports & LEDs → Color balance; CLI `balance`),

@@ -66,6 +66,10 @@ owns the next `ch_count` entries; channels not in any canvas follow. Loop canvas
 canvases are 14–15. To add or replace canvases the app sends: params for each canvas → map → length.
 **[verified]** (5-canvas Solid layout.)
 
+Which settings each effect uses (from the app's effect catalog) is in `protocol.EFFECT_PARAMS`; slider ranges
+in the app: brightness 0–100, step (speed) 1–10, size 0–50, delay 0–8, frame delay 1–255 ms. Per-canvas extras:
+`FRAME_DELAY[canvas]`, `DYNAMIC_1[canvas]` = palette group, `DYNAMIC_2[canvas]` = blend.
+
 **Effects** (`effect` = index): 0 Off, 1 Solid, 2 Breath, 3 Scanning, 4 Rainbow, 5 Rainbow cycle,
 6 Meteor, 7 Shake, 8 Slowly wipe, 9 Color wipe, 10 Rainbow strip, 11 Rainbow strip l, 12 Wave, 13 Sunny,
 14 Pull flower, 15 Stackab1, 16 Stackab2, 17 Stackab3, 18 Integration1, 19 Integration2, 20 Interchange,
@@ -126,11 +130,15 @@ words, with trailing bytes fed as `b << 24` (STM32/CH32 hardware CRC). Matches t
   range; the firmware maps the ranges in order onto the channels with nonzero `FSEQ_LED_NUM`, in
   ascending fw channel order. We write one range per active channel.
 - **Frame bytes go to the LEDs unconverted, so store colors as G, R, B.** (Bytes `00 66 00` showed red.)
-- Upload: `F3 03` stop → `FA 10` channel map → erase blocks → WRITE_RAW in 1016-byte chunks → device
-  CRC (fallback: read back) → poll `F9 11` until present. 190 KB took 1.6 s.
+- Upload (as the app does it): `F3 03` stop → `FA 10` channel map → erase blocks → WRITE_RAW in 1016-byte chunks
+  → device CRC (fallback: read back) → poll `F9 11` until present. 190 KB took 1.6 s. OpenNollie stops with
+  `FA 01 01` instead of `F3 03` (see SL below) and skips the upload when the same file is already stored.
 - Play: `[F3, 02, 0, 0, loop]`. Stop: `F3 03`. Status: `F3 04` → `[F3, playing, position u32, code]`.
-  Right after an upload/stop the device sits in mode **SL** for ~2–3 s and ignores PLAY; wait for HW.
   While playing, mode = FSEQ.
+- **Mode SL = LEDs paused (dark) while the flash is busy.** Entered on `F3 03` (stop) and on flash access (CRC,
+  writes); it lasts until ~1.2 s after the last flash operation, ignores live frames and PLAY, and can't be cut
+  short. Afterwards the device returns to its stored lighting. **`FA 01 01` (mode HW) stops playback instantly
+  without SL**, so OpenNollie stops playback that way and never sends `F3 03`. **[verified]**
 - Persist: boot playlist steady = 1 (FSEQ loop). After a reboot the device plays the animation by itself.
 - Play result codes: 0 OK, 1 erased, 2 busy, 3 no channel map, 4 no file, 5 bad header, 6 map mismatch,
   7 compressed, 8 read error, 255 pending.

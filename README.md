@@ -8,8 +8,10 @@ Open-source Linux app for the **Nollie 16CH** RGB controller: per-port colors, c
   keyframe timelines**, per port or flowing across all ports in the order you choose
 - **Save to device:** effects are rendered into a seamless loop and stored in the controller's flash; it plays
   at power-on with nothing running on the PC
-- The controller's own **24 built-in effects** (canvases), palettes, boot animations, idle fallback
+- The controller's own **24 built-in effects** in groups of ports, a **startup animation**, palettes, idle fallback
 - **LED counts and LED order** per port, with an on-device LED test, and SignalRGB / Nollie layout presets
+- **Color balance** per port, so devices with different LEDs (e.g. a GPU) show the same colors as the fans
+- An **editable picture of your case**: arrange your fans and strips (daisy-chained fans too) for the previews
 - Upload **xLights FSEQ** animations; **backup and restore** of all controller settings; power readings
 - **Desktop app** (Qt) with a live preview of your case, a **tray icon** for quick switching, a **CLI**, and a
   small background **service**
@@ -49,14 +51,17 @@ Use one of the two, not both.
 
 | Page | What it does |
 |---|---|
-| **Effects studio** | Build a profile from layers (ports + effect + colors + speed …), watch it on the case preview, *Preview on device* (live), **Save to device** (stored), save/open profiles |
-| **Built-in effects** | The controller's own effects: canvases of ports, each with an effect and settings; boot canvases that play once at power-on |
+| **Effects studio** | Pick a profile from the dropdown (yours, then the examples) or make one: layers of ports + effect + colors + speed + pattern (in sync / flowing). Watch it on the case preview, *Preview on device* (live), **Save to device** (stored). The last profile you edited reopens next time |
+| **Built-in effects** | The controller's own effects. *Normal lighting*: groups of ports, each with an effect, showing only the settings that effect uses. *Startup animation*: plays once when the PC turns on. Changes apply as you make them |
 | **Ports & LEDs** | Port names, LED counts, *Identify*, *LED test* (find the count), *LED order* (reverse, start LED, presets), *Color balance* (match a device's colors to the others, e.g. a GPU) |
-| **Palettes** | The controller's 8 palette groups |
+| **Layout** | The case picture used for previews: add fans and strips, drag them into place, set their port (and which LEDs, for daisy chains), size, angle and name; light one up on the device to find it |
+| **Palettes** | The controller's 8 palette groups (used by palette effects) |
 | **Stored animation** | What's in the controller's flash; play/stop; upload an FSEQ file |
 | **Device** | Name, firmware, power readings, startup behaviour, idle fallback, backup/restore, restart, factory reset |
+| **Settings** | Whether the tray icon and the background service start when you log in |
 
-**Tray icon:** *Run live* or *Save to device* any profile, stop the live effect, open the app.
+**Tray icon:** *Run live* or *Save to device* any profile, stop the live effect, open the app. It starts at login
+unless you turn that off in *Settings*; the app window never opens by itself.
 
 **CLI** (`opennollie --help` for everything):
 
@@ -108,7 +113,9 @@ brightness = 0.7
 - `spread = 0` (the default) keeps every port **in sync**; `spread > 0` makes the pattern **flow** across the ports
   (1 = one full cycle across them). `unit = "led"` runs it along the LEDs instead: `span = "port"` around each fan
   (fans in sync), `span = "group"` along all LEDs as one strip.
-- LED counts and LED order come from the controller unless a profile sets `leds`.
+- LED counts and LED order come from the controller unless a profile sets `leds`; color balance comes from
+  `~/.config/opennollie/calibration.toml`. Previews show the intended colors; the balance only changes what is
+  sent to a device so that it looks like the preview.
 
 **How "Save to device" stores a profile:** if every layer is `static`, it becomes the controller's built-in
 Solid canvases (instant). Otherwise the whole loop is rendered (frames = the least common multiple of the layers'
@@ -125,6 +132,17 @@ Saving an unchanged profile again skips the write.
   stretch them over their LEDs (per-LED patterns get smoothed), and their colors can differ from the fans'
   (e.g. weaker blue): fix that with *Color balance*.
 - The 16CH firmware has no automatic LED-count detection or power test; use `ledtest` / *LED test*.
+
+## Your files
+
+| File | What |
+|---|---|
+| `~/.config/opennollie/profiles/*.toml` | your profiles |
+| `~/.config/opennollie/layout.json` | the case picture |
+| `~/.config/opennollie/calibration.toml` | color balance per port |
+| `~/.local/state/opennollie/` | the last edited profile, and a fingerprint of what's stored on the controller |
+
+The controller itself keeps its effects, LED counts, LED orders, port names and the stored animation.
 
 ## Troubleshooting
 
@@ -143,8 +161,10 @@ python3 -m tests.hw_roundtrip             # writes test values to a real control
 
 - `opennollie/protocol.py`, `device.py`, `flash.py`, `fseq.py`: the controller protocol, documented in
   [docs/PROTOCOL.md](docs/PROTOCOL.md)
-- `effects.py`, `profile.py`, `engine.py`, `layouts.py`: effects, profiles, rendering, LED orders
-- `daemon.py`, `client.py`: the background service; `cli.py`; `gui/`: the Qt app and tray
+- `effects.py`, `profile.py`, `engine.py`, `layouts.py`, `calibration.py`, `caselayout.py`: effects, profiles,
+  rendering, LED orders, color balance, the case picture
+- `daemon.py`, `client.py`, `autostart.py`: the background service and login switches; `cli.py`; `gui/`: the Qt
+  app and tray. `tests/fakedevice.py` simulates the controller for offline tests
 - `tools/`: USB capture and analysis helpers used to work out the protocol
 - [CLAUDE.md](CLAUDE.md): project notes, decisions, and the release checklist
 
