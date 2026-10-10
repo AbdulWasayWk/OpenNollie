@@ -101,7 +101,7 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 | LED settings | LED count per port, names | [x] |
 | LED settings | LED order remap (vmap), component/vmap presets | [x] `layouts.py`, Ports page "LED order", CLI `order`; our engine applies the order to live/stored effects itself (fw only applies it to built-in effects with vmap_process) |
 | LED settings | auto-detect LED count | N/A on 16CH (fw lacks it); our `ledtest` replaces it |
-| Palette editor | 8 palettes × 16 colors; import/export JSON | [x] (palette write verified; page explains ColorFromPalette + shows which groups use each palette; GUI write not yet checked by eye) |
+| Palette editor | 8 palettes × 16 colors; import/export JSON | [x] (palette write verified; page explains ColorFromPalette + shows which groups use each palette; GUI write verified by the user) |
 | FSEQ player | upload FSEQ (erase/write/verify), channel map, play/stop/loop | [x] verified on hw |
 | Device info | power (V/I/temp/load), flash chip, write count, stored FSEQ size | [x] |
 | Backup | export/restore config JSON, factory reset, restart | [x] all verified on hw (factory reset + restore from the GUI by the user, 2026-10-11) |
@@ -148,6 +148,7 @@ Saved lighting has two layers: **(a)** built-in HW effects on canvases (cheap, f
 ## Definition of done (release checklist)
 
 The app is **done** when every item below is checked. Keep this list current; it's the single to-do list.
+**Status 2026-10-11: every item is checked; the app is done.** New work goes in as new items.
 
 **Verification**
 - [x] User has tested the GUI on the real desktop (KDE/Breeze): basic functionality works, saved settings survived
@@ -156,8 +157,7 @@ The app is **done** when every item below is checked. Keep this list current; it
 - [x] Factory reset run from our app (GUI) and restored from a backup (user, 2026-10-11). Port names weren't in that
       backup (none were stored when it was taken); name restore verified on hw separately
 - [x] Built-in group split for color balance (fans + GPU, Breath) stays in step (user, 2026-10-11)
-- [ ] Palettes page: write from the GUI verified on hardware by eye (a group with ColorFromPalette; the user didn't
-      find where palettes apply, so the page now explains it). Reads/writes round-trip in `hw_roundtrip`
+- [x] Palettes page: write from the GUI verified on hardware by eye (a group with ColorFromPalette; user, 2026-10-11)
 
 **Installation**
 - [x] `tools/install-user.sh` run 2026-10-11 (user's OK): `opennollie` / `opennollie-gui` in ~/.local/bin, app-menu
