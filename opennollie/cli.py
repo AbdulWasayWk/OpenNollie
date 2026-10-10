@@ -276,18 +276,15 @@ _last_progress: list = [None, -1]
 
 
 def _progress(phase: str, done: int, total: int) -> None:
-    """Print each phase's progress in 10 % steps."""
+    """One line per phase, e.g. '  write 0% 10% … 100%'."""
     pct = 100 * done // max(total, 1) // 10 * 10
-    if [phase, pct] != _last_progress:
-        _last_progress[:] = [phase, pct]
-        end = "\n" if pct >= 100 else ""
-        start = "\n" if pct == 0 and phase != "render" else ""
-        print(f"{start}  {phase} {pct}%" if pct == 0 else f" {pct}%", end=end, flush=True)
-
-
-def load_profile(dev: Nollie16, path: str) -> profile.Profile:
-    counts = dev.led_counts()
-    return profile.load(path).with_device_leds({pt: counts[p.PORT_TO_CH[pt - 1]] for pt in range(1, p.NUM_CHANNELS + 1)})
+    phase_changed = phase != _last_progress[0]
+    if not phase_changed and pct == _last_progress[1]:
+        return
+    if phase_changed:
+        print(("" if _last_progress[0] is None else "\n") + f"  {phase}", end="")
+    _last_progress[:] = [phase, pct]
+    print(f" {pct}%", end="", flush=True)
 
 
 def cmd_live(dev: Nollie16, args) -> None:
@@ -300,7 +297,8 @@ def cmd_live(dev: Nollie16, args) -> None:
 def cmd_save(dev: Nollie16, args) -> None:
     prof = load_profile(dev, args.profile)
     print(f"saving '{prof.name}' to the device…")
-    print(engine.save_to_device(dev, prof, _progress))
+    result = engine.save_to_device(dev, prof, _progress)
+    print(("\n" if _last_progress[0] else "") + result)
 
 
 def cmd_play(dev: Nollie16, args) -> None:
@@ -311,7 +309,8 @@ def cmd_play(dev: Nollie16, args) -> None:
         led_map = f.fseq_led_map() if args.keep_map else _led_map_arg(args.map)
         if (why := fseq.led_map_matches(hdr, led_map)) is not None:
             sys.exit(f"channel map doesn't fit the file: {why}")
-        print(f.upload_fseq(data, led_map, _progress))
+        info = f.upload_fseq(data, led_map, _progress)
+        print(f"\nuploaded: {info.size} bytes")
     print("playing" if f.play(loop=not args.once) else "device did not start playback")
 
 
