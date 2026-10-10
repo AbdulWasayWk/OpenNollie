@@ -23,7 +23,8 @@ Open-source Linux app for the **Nollie 16CH** RGB controller: per-port colors, c
 - A **Nollie 16CH on firmware 2.3.0** (USB ID `16d5:2a16`). Controllers on older firmware show up as
   `3061:4716`; update them **once** with the official NollieRGB 2.3.0 app on Windows (a VM with USB passthrough
   works). OpenNollie never touches firmware.
-- Linux with Python ≥ 3.11, `python-hidapi`, `pyside6` (Arch package names)
+- Linux with Python ≥ 3.11, `python-hidapi`, `pyside6` (Arch package names). Developed and tested on
+  CachyOS/Arch (KDE Plasma); other distros should work but are untested, and install steps here are for Arch
 - Access to the device: the udev rule in `packaging/70-opennollie.rules` (the package installs it; OpenRGB's rules
   also cover the controller)
 

@@ -251,6 +251,28 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] pyproject.toml (commands: opennollie, opennollie-daemon, opennollie-gui, opennollie-tray), examples as package data
 - [x] PKGBUILD builds and passes check(). README done. User install via tools/install-user.sh (incl. tray autostart)
 
+**Project status (2026-10-11): done.** Every Definition-of-done item is checked and pushed. The user closed the
+project; the items below are for another day.
+
+### Later (not part of done; decided with the user 2026-10-11)
+- [ ] **Ubuntu / Debian and Fedora support** (postponed: the user has no Ubuntu/Fedora setup to test on). The code is
+      distro-neutral (Python, hidapi, Qt, systemd --user, udev uaccess, XDG autostart); the work is install/packaging/test:
+  - Dependencies: Ubuntu/Debian `python3-hid` (cython-hidapi, `hid.device`) + `python3-pyside6.*` (only in newer
+    Ubuntu releases; 24.04 LTS may need pip in a venv: `pip install hidapi PySide6`); Fedora `python3-hidapi` (**not**
+    Fedora's `python3-hid`, a different library with the same import name) + `python3-pyside6`. Python ≥ 3.11
+    (Ubuntu 22.04 is too old).
+  - `tools/install-user.sh`: check device access and offer the udev rule step (it needs sudo; without OpenRGB nothing
+    grants access). Make it distro-neutral (it has no pacman calls, but the README's commands are Arch).
+  - GNOME (Ubuntu/Fedora default): tray needs AppIndicator (Ubuntu ships it, Fedora needs the extension); sidebar
+    icons are KDE/Breeze names (`gui/*.py` `icon = …`), so add fallbacks or bundled icons.
+  - Packaging: `.deb` and `.rpm` (or a `pipx` route); Flatpak is a poor fit (hidraw access + user service).
+  - Testing: Docker is on this machine: Ubuntu and Fedora containers for install + unit tests + CLI with the
+    controller passed in (`--device /dev/hidrawN`); the GUI on a real GNOME desktop needs a VM or a tester.
+- [ ] Power readout outside the Device page (status bar / tray tooltip); optional graph over time. (Live readout already
+      on the Device page, every 2 s. Measured: 5.05 A / ~24 W for solid orange at 100 %; the controller has 2 Molex
+      inputs and a 15 A fuse per SignalRGB's guide, so no brightness cap is needed for safety.)
+- [ ] Color balance for ColorFromPalette (balanced palette copies would take palette slots the user owns).
+
 ## Open questions
 - What's on interface 1 (keyboard, 8 B IN)? Probably irrelevant.
 - What exactly is mode SL (2)? It's seen for ~2–3 s after an FSEQ upload/stop; PLAY is ignored then.
