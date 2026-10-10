@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from . import client, engine, fseq, profile
+from . import client, engine, fseq, model, profile
 from . import protocol as p
 from .device import DeviceNotFound, NoResponse, Nollie16
 from .flash import Flash
@@ -93,6 +93,23 @@ def cmd_info(dev: Nollie16, args) -> None:
 def cmd_dump(dev: Nollie16, args) -> None:
     json.dump(DeviceState.read(dev, with_led_index=args.vmap).to_dict(), sys.stdout, indent=1)
     print()
+
+
+def cmd_backup(dev: Nollie16, args) -> None:
+    state = DeviceState.read(dev, with_led_index=True)
+    with open(args.file, "w") as f:
+        json.dump(state.to_dict(), f, indent=1)
+    print(f"saved the controller's settings to {args.file} (the stored animation itself is not included)")
+
+
+def cmd_restore(dev: Nollie16, args) -> None:
+    with open(args.file) as f:
+        target = DeviceState.from_dict(json.load(f))
+    if target.serial and target.serial != dev.serial:
+        print(f"note: backup is from controller {target.serial}, this is {dev.serial}")
+    changes = model.restore(dev, target, include_name=args.name, dry_run=args.dry_run)
+    verb = "would change" if args.dry_run else "restored"
+    print(f"{verb}: " + ", ".join(changes) if changes else "nothing to change: the controller already matches")
 
 
 def cmd_power(dev: Nollie16, args) -> None:
@@ -377,6 +394,14 @@ def main(argv=None) -> None:
     sp = sub.add_parser("dump", help="dump the device configuration as JSON (read-only)")
     sp.add_argument("--vmap", action="store_true", help="include the per-LED index maps")
     sp.set_defaults(func=cmd_dump)
+    sp = sub.add_parser("backup", help="save all controller settings to a JSON file (read-only)")
+    sp.add_argument("file")
+    sp.set_defaults(func=cmd_backup)
+    sp = sub.add_parser("restore", help="write settings from a backup file (only what differs)")
+    sp.add_argument("file")
+    sp.add_argument("--dry-run", action="store_true", help="only show what would change")
+    sp.add_argument("--name", action="store_true", help="also restore the controller name")
+    sp.set_defaults(func=cmd_restore)
     sub.add_parser("power", help="input voltage/current, MCU temperature (read-only)").set_defaults(func=cmd_power)
 
     sp = sub.add_parser("set", help="live: set ports to solid colors; unlisted ports turn off",

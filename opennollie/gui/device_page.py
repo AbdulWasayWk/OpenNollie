@@ -6,6 +6,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QVBoxLayout, QWidget)
 
+from .. import model
 from .. import protocol as p
 from ..flash import Flash
 from ..model import DeviceState
@@ -82,6 +83,7 @@ class DevicePage(QWidget):
         maint = QGroupBox("Maintenance")
         ml = QHBoxLayout(maint)
         for text, slot in (("Refresh", self.refresh), ("Back up settings…", self._backup),
+                           ("Restore settings…", self._restore),
                            ("Restart controller", self._restart), ("Factory reset…", self._reset)):
             b = QPushButton(text)
             b.clicked.connect(slot)
@@ -155,6 +157,28 @@ class DevicePage(QWidget):
                 json.dump(state.to_dict(), f, indent=1)
             info(self, "Backup", f"Saved to {path}")
         self.device.run(lambda d: DeviceState.read(d, with_led_index=True), save, lambda e: error(self, "Backup", e))
+
+    def _restore(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Restore controller settings", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path) as f:
+                target = DeviceState.from_dict(json.load(f))
+        except Exception as e:
+            return error(self, "Restore", f"Not a backup file: {e}")
+
+        def preview(changes):
+            if not changes:
+                return info(self, "Restore", "Nothing to change: the controller already matches this backup.")
+            note = (f"\n\nThis backup is from controller {target.serial}." if target.serial and
+                    target.serial != self.fields["serial"].text() else "")
+            if confirm(self, "Restore settings", "These settings will be written to the controller:\n\n• " +
+                       "\n• ".join(changes) + note + "\n\nThe stored animation isn't part of a backup."):
+                self.device.run(lambda d: model.restore(d, target),
+                                lambda done: (info(self, "Restore", f"Restored {len(done)} setting(s)."), self.refresh()),
+                                lambda e: error(self, "Restore", e))
+        self.device.run(lambda d: model.restore(d, target, dry_run=True), preview, lambda e: error(self, "Restore", e))
 
     def _restart(self) -> None:
         if confirm(self, "Restart controller", "Restart the controller now? Lighting blinks briefly."):
