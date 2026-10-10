@@ -191,6 +191,8 @@ class Nollie16:
         self.send(p.set_effect(EffectItem.START_FPS if boot else EffectItem.FPS, ms))
 
     def set_zled_counts(self, counts: Sequence[int]) -> None:
+        """Dark LEDs after the lit ones, per channel. The firmware ignores the write if any channel's
+        LED + zLED count exceeds 256."""
         self.send(p.set_effect(EffectItem.ZLED_NUM, p.u16le(counts)))
 
     def set_dynamic(self, which: int, values: Sequence[int]) -> None:
