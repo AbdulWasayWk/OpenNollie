@@ -211,3 +211,44 @@ EFFECTS: dict[str, Callable[[EffectSpec], Effect]] = {
     "flicker": _flicker,
     "keyframes": _keyframes,
 }
+
+
+@dataclass(frozen=True)
+class Param:
+    """An effect-specific setting, for building editors."""
+    key: str
+    label: str
+    kind: str                 # "float" | "bool"
+    default: float | bool
+    lo: float = 0.0
+    hi: float = 1.0
+
+
+@dataclass(frozen=True)
+class EffectInfo:
+    label: str
+    help: str
+    colors: tuple[int, int]   # (min, max) number of colors used; (0, 0) = none
+    params: tuple[Param, ...] = ()
+    uses_spread: bool = True
+
+
+EFFECT_INFO: dict[str, EffectInfo] = {
+    "static": EffectInfo("Static", "One solid color.", (1, 1), uses_spread=False),
+    "gradient": EffectInfo("Gradient", "Colors spread across the ports/LEDs; can scroll.", (2, 8),
+                           (Param("scroll", "Scroll", "bool", False),), uses_spread=False),
+    "breathe": EffectInfo("Breathe", "Fade in and out; each breath uses the next color.", (1, 8),
+                          (Param("min", "Minimum level", "float", 0.0, 0.0, 0.9),)),
+    "cycle": EffectInfo("Color cycle", "Step through the colors, fading between them.", (2, 8)),
+    "rainbow": EffectInfo("Rainbow", "All hues; spread 1 shows the whole rainbow across the group.", (0, 0),
+                          (Param("saturation", "Saturation", "float", 1.0, 0.0, 1.0),)),
+    "wave": EffectInfo("Wave", "A soft band of the first color travelling over the second.", (1, 2),
+                       (Param("width", "Band width", "float", 0.5, 0.05, 1.0),)),
+    "comet": EffectInfo("Comet", "A bright head with a fading tail running across.", (1, 2),
+                        (Param("tail", "Tail length", "float", 0.3, 0.05, 1.0),)),
+    "blink": EffectInfo("Blink", "Hard on/off flashes; each flash uses the next color.", (1, 8),
+                        (Param("duty", "On time", "float", 0.5, 0.05, 0.95),)),
+    "flicker": EffectInfo("Flicker", "Candle/fire flicker between the colors (dark → bright).", (1, 4),
+                          (Param("amount", "Amount", "float", 0.6, 0.0, 1.0),)),
+    "keyframes": EffectInfo("Custom keyframes", "Your own color timeline: colors at points in the cycle.", (0, 0)),
+}

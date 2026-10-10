@@ -176,8 +176,15 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [ ] systemd user unit + install script (needs the user's OK)
 - [ ] Backup/restore of the device config (JSON)
 
-### Phase 5: GUI (PySide6)
-- [ ] Pages mirroring the feature catalog + our effects editor and live preview
+### Phase 5: GUI (PySide6) — `python3 -m opennollie.gui`
+- [x] `gui/app.py` main window; `common.py` (Device: one background thread for all device calls, reconnects;
+      ColorButton, PortPicker); `caseview.py` (schematic of this case, animated LEDs)
+- [x] Pages: Effects studio (layers, all effects incl. built-in, keyframe timeline, live case preview, preview on
+      device, save to device, open/save TOML), Built-in effects (loop/boot canvases), Ports & LEDs (names, counts,
+      identify, LED test dialog), Palettes (+ import/export), Stored animation (status, play/stop, FSEQ upload),
+      Device (name, power, startup playlist, idle fallback, backup JSON, restart, factory reset)
+- [x] Offscreen screenshot check of every page; every effect exercised in the editor without errors
+- [ ] User test on the real desktop (Breeze style); restore-from-backup; tray icon?
 
 ### Phase 6: Packaging
 - [ ] PKGBUILD, udev rule, systemd unit, README

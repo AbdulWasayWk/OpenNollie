@@ -164,6 +164,84 @@ def from_dict(d: dict) -> Profile:
     return prof
 
 
+def _hex(c) -> str:
+    return "#%02x%02x%02x" % tuple(c)
+
+
+def _ports_text(ports: list[int]) -> str:
+    """[4,5,6,7,9] -> '4-7,9' (keeps order; collapses ascending runs)."""
+    out, i = [], 0
+    while i < len(ports):
+        j = i
+        while j + 1 < len(ports) and ports[j + 1] == ports[j] + 1:
+            j += 1
+        out.append(str(ports[i]) if j - i < 2 else f"{ports[i]}-{ports[j]}")
+        if 0 < j - i < 2:
+            out[-1:] = [str(x) for x in ports[i : j + 1]]
+        i = j + 1
+    return ",".join(out)
+
+
+def layer_to_dict(layer: Layer) -> dict:
+    s = layer.spec
+    d = {"ports": _ports_text(layer.ports), "effect": s.kind}
+    if s.kind != "rainbow" and s.kind != "keyframes":
+        d["colors"] = [_hex(c) for c in s.colors]
+    d |= {"period": s.period, "spread": s.spread, "brightness": s.brightness}
+    if s.reverse:
+        d["reverse"] = True
+    if s.interp != "smooth":
+        d["interp"] = s.interp
+    if layer.unit != "port":
+        d |= {"unit": layer.unit, "span": layer.span}
+    for k, v in s.params.items():
+        if k == "keyframes":
+            v = [[float(pos), c if isinstance(c, str) else _hex(c)] for pos, c in v]
+        d[k] = v
+    return d
+
+
+def to_dict(prof: Profile) -> dict:
+    d = {"name": prof.name, "fps": prof.fps}
+    if prof.leds is not None:
+        d["leds"] = prof.leds
+    if prof.groups:
+        d["groups"] = {k: _ports_text(v) for k, v in prof.groups.items()}
+    if prof.port_leds:
+        d["ports"] = {str(k): {"leds": v} for k, v in sorted(prof.port_leds.items())}
+    d["layer"] = [layer_to_dict(l) for l in prof.layers]
+    return d
+
+
+def _toml_value(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(round(v, 4)) if isinstance(v, float) else str(v)
+    if isinstance(v, str):
+        return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
+    raise TypeError(f"can't write {type(v).__name__} to TOML")
+
+
+def dumps(prof: Profile) -> str:
+    """Profile -> TOML text (round-trips through loads)."""
+    d = to_dict(prof)
+    lines = [f"{k} = {_toml_value(d[k])}" for k in ("name", "fps", "leds") if k in d]
+    if "groups" in d:
+        lines += ["", "[groups]"] + [f"{k} = {_toml_value(v)}" for k, v in d["groups"].items()]
+    for port, v in d.get("ports", {}).items():
+        lines += ["", f"[ports.{port}]", f"leds = {v['leds']}"]
+    for layer in d["layer"]:
+        lines += ["", "[[layer]]"] + [f"{k} = {_toml_value(v)}" for k, v in layer.items()]
+    return "\n".join(lines) + "\n"
+
+
+def save(prof: Profile, path: str | Path) -> None:
+    Path(path).write_text(dumps(prof))
+
+
 def load(path: str | Path) -> Profile:
     with open(path, "rb") as f:
         return from_dict(tomllib.load(f))

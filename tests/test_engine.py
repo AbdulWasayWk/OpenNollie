@@ -72,6 +72,17 @@ class Profiles(unittest.TestCase):
     def test_port_order_is_kept(self):
         self.assertEqual(parse_ports("16-14,9"), [16, 15, 14, 9])
 
+    def test_toml_round_trip(self):
+        import glob
+        from opennollie import profile
+        for path in glob.glob("profiles/*.toml"):
+            a = profile.load(path)
+            self.assertEqual(profile.to_dict(profile.loads(profile.dumps(a))), profile.to_dict(a), path)
+
+    def test_effect_info_covers_all_effects(self):
+        from opennollie.effects import EFFECT_INFO, EFFECTS
+        self.assertEqual(set(EFFECT_INFO), set(EFFECTS))
+
     def test_rejects_unknown_effect(self):
         with self.assertRaises(ValueError):
             loads('[[layer]]\neffect = "nope"')
