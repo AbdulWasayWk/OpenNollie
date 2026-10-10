@@ -2,200 +2,209 @@
 
 > This file is the single source of truth for the project: goals, decisions, status and
 > findings. **Update it as work progresses**: tick off tasks, record findings, log decisions.
-> Detailed protocol notes live in `docs/PROTOCOL.md` once that file exists; summarize them here.
+> Wire-level detail lives in `docs/PROTOCOL.md`; summarize it here.
 
 ## Goal
 
-An open-source Linux app for the **Nollie 16CH RGB** controller (USB `3061:4716`):
+An open-source Linux app for the **Nollie 16CH RGB** controller (now on firmware 2.3.0, USB `16d5:2a16`):
 
 1. Set a color (or a few colors) **per channel**, live. Per-LED control is not needed.
-2. **Effects engine**: static, breathing, rainbow, wave, gradient, etc. Fully configurable,
-   user-defined effects that can be assigned per channel or to all channels.
-3. **Save to device**, so lighting keeps working with no software running. OpenRGB can't do
-   this; the official Windows app can.
-4. Scope: the user's CachyOS (Arch) machine first. Portability comes later.
+2. **Effects**: static, breathing, rainbow, wave, gradient, etc. Fully configurable, user-defined
+   effects that can be assigned per channel or to all channels.
+3. **Save to device**, so lighting keeps working with no software running.
+4. **Feature parity with the official NollieRGB 2.3.0 app** (user request 2026-10-10). See *Feature catalog*.
+5. Scope: the user's CachyOS (Arch) machine first. Portability comes later.
 
 ## Environment facts
 
-- Host: CachyOS, kernel 7.x, shell `fish`. Python 3 is available. No Rust toolchain.
-- Nollie: **`16d5:2a16`** (current fw since 2026-10-10; was `3061:4716` legacy) "nollie.cn Nollie 16CH RGB",
-  serial `00B7FE6232DC30F6`, bcdDevice `0.10`, USB bus 1, port `1-8`.
-- One HID interface (`1-8:1.0`): EP `0x81` IN (64 B), EP `0x01` OUT (**1024 B**).
-- OpenRGB 1.0+ (git66) is installed and has a Nollie driver. Use it as the reference for the
-  live protocol.
-- Python libs come from pacman (`python-hidapi`, `pyside6`), with no venv. The PKGBUILD will depend on the same packages.
-- The Windows VM with the official Nollie app runs under **libvirt/QEMU**. With USB passthrough,
-  the host sees all USB traffic, so we **sniff on the host with `usbmon` + Wireshark**.
-- After the VM uses the Nollie via passthrough, `usbhid` may stay unbound and no hidraw node
-  appears. Fix: `tools/setup-dev.sh bind`.
-- HID report descriptor: vendor page `0xFF00`. **Output report = 1024 bytes, input report = 64 bytes,
-  no report IDs** (hidapi writes need a leading `0x00` byte, so 1025 bytes in total).
-- Capturing: `tools/setup-dev.sh usbmon` (once per boot, sudo), then `tools/capture.sh <name> [secs]`
-  writes `captures/<name>.pcapng`. The user is in the `wireshark` group, but it isn't active until
-  they re-login; `capture.sh` falls back to a private dumpcap copy until then.
+- Host: CachyOS, KDE Plasma 6 (Wayland), kernel 7.x, shell `fish`. Python 3.14. No Rust toolchain.
+- Nollie: **`16d5:2a16`** "nollie.cn Nollie 16CH RGB", **fw 2.3.0** (internal version 19, hw 165), serial
+  `00B7FE6232DC30F6`, USB bus 1, port `1-8`. Updated from legacy fw (`3061:4716`) on 2026-10-10.
+- HID interfaces: **if0** = vendor page `0xFF00`, 1024 B OUT + **1024 B IN**, no report IDs (hidapi: write
+  `0x00` + 1024 B). This is the protocol interface. **if1** = boot keyboard (usage 1/6, 8 B IN), purpose unknown;
+  ignore it. Pick if0 by `interface_number == 0`.
+- OpenRGB's `60-openrgb.rules` already grants `uaccess` for `16d5:2a16`. Ours: `packaging/70-opennollie.rules`.
+- Python libs come from pacman (`python-hidapi`, `pyside6`), no venv. Python 3.11 for RE is at
+  `~/.local/share/uv/python/cpython-3.11.15-linux-x86_64-gnu/bin/python3.11`.
+- Windows VM `win10` (libvirt, `qemu:///system`, user is in the `libvirt` group) has NollieRGB 2.3.0. Its persistent
+  hostdev is still the old ID `3061:4716`; use `tools/vm-follow-nollie.sh` or update the XML (ask first).
+- The host sees passthrough USB traffic: `tools/setup-dev.sh usbmon` (once per boot, sudo), then
+  `tools/capture.sh <name> [secs]` → `captures/<name>.pcapng`.
+- After the VM releases the Nollie, `usbhid` normally re-binds by itself. If not: `tools/setup-dev.sh bind`.
 
 ## Port map (this machine)
 
-Port numbers are OpenRGB's / our CLI's (`Channel 1..16`). Verified 2026-10-10 with `opennollie identify`.
+"Port N" = OpenRGB's / NollieRGB app's "Channel N" = our CLI's port N. `fw ch` = channel index on the wire for
+fw 2.3.0 (app `N_DEV_CH_NAME['Nollie16']`). Devices verified 2026-10-10 with `identify` on the legacy fw.
 
-| Port | Wire ch | Device |
-|------|---------|--------|
-| 1  | 19 | — (not connected) |
-| 2  | 18 | — (not connected) |
-| 3  | 17 | — (not connected) |
-| 4  | 16 | Back exhaust fan |
-| 5  | 24 | Top exhaust fan |
-| 6  | 25 | Bottom back intake fan |
-| 7  | 26 | Bottom middle intake fan |
-| 8  | 27 | Bottom front intake fan |
-| 9  | 20 | GPU (GPU's own ARGB set to external sync via OpenRGB) |
-| 10 | 21 | — (not connected) |
-| 11 | 22 | — (not connected) |
-| 12 | 23 | CPU cooler fan, back |
-| 13 | 31 | CPU cooler fan, front |
-| 14 | 30 | Side middle intake fan |
-| 15 | 29 | Side bottom intake fan |
-| 16 | 28 | Side top intake fan |
+| Port | fw ch | Device |
+|------|-------|--------|
+| 1  | 3  | — (not connected) |
+| 2  | 2  | — (not connected) |
+| 3  | 1  | — (not connected) |
+| 4  | 0  | Back exhaust fan |
+| 5  | 8  | Top exhaust fan |
+| 6  | 9  | Bottom back intake fan |
+| 7  | 10 | Bottom middle intake fan |
+| 8  | 11 | Bottom front intake fan |
+| 9  | 4  | GPU (GPU's own ARGB set to external sync via OpenRGB) |
+| 10 | 5  | — (not connected) |
+| 11 | 6  | — (not connected) |
+| 12 | 7  | CPU cooler fan, back |
+| 13 | 15 | CPU cooler fan, front |
+| 14 | 14 | Side middle intake fan |
+| 15 | 13 | Side bottom intake fan |
+| 16 | 12 | Side top intake fan |
 
-Groups (for default profiles): exhaust = 4, 5 · bottom intake = 6–8 · side intake = 14–16 ·
-CPU cooler = 12, 13 · GPU = 9. Used ports: `4-9,12-16`.
+Groups: exhaust = 4, 5 · bottom intake = 6–8 · side intake = 14–16 · CPU cooler = 12, 13 · GPU = 9.
+Used ports: `4-9,12-16`. Real LED counts per device are unknown; the firmware has LED-count auto-detection.
+
+## Firmware model (fw 2.3.0), summary
+
+Full detail: `docs/PROTOCOL.md`. Every command is a 1024 B output report; GETs answer with a 1024 B input
+report (data starts at byte 0). All multi-byte values are **little-endian**.
+
+- **Settings persist automatically.** Every SET is stored on the device (`WRITE_COUNT` counts flash
+  programs). The new firmware has **no separate "save" step**; the app pushes each change immediately.
+- **Mode** (`FA 01 m`): 0 = OL (host streams frames), 1 = HW (built-in effects, default), 2 = SL, 3 = FSEQ.
+- **Canvases**: groups of channels that share one effect. Loop canvases are 0..13 (`CANVAS_LEN`, map `FA 03`);
+  start/boot canvases are 14+ (`START_CANVAS_LEN`, map `FA 0B`). Each canvas has `CH_PARAM` (`FA 02 canvas …`):
+  effect, brightness, step (speed), size, ch-count, vmap-process, delay, 3 colors.
+- **Effects** = index into `NOLLIE_EFFECT_RAW` (24: Off, Solid, Breath, Scanning, Rainbow, …, ColorFromPalette).
+  Boot effects: `NOLLIE_START_EFFECT_RAW` (8: Light up, Color wipe, …).
+- **Per channel**: LED count (`FA 08`, u16 ×16), zLED (`FA 09`), LED index remap ("vmap", `F8`), vmap name (`F6 07`).
+- **Global**: FPS as frame ms (`FA 06`/`FA 07` start), palettes 8×16 GRB (`FA 0D`), dynamic 1/2, frame delay,
+  boot playlist (intro, steady) (`FA 13`), idle fallback seconds after streaming stops (`F6 16`), controller
+  name (`F6 06`), timestamps.
+- **Live**: per channel `[ch, 0, 0, 0, GRB × 256]`, then `FF` = show. Streaming overrides the HW effect. Revert with
+  `FA 01 01` or let the idle timer do it.
+- **Stored animations**: FSEQ v2 (uncompressed) in SPI flash (16 MB GD25Q128, region from `0x10000`), uploaded via
+  `F4` flash ops; played with `F3 02` or as the boot "steady" item.
+- **Maintenance**: factory reset `FA 21` (keeps calibration), super reset `FA 22`, soft reboot `FA 23`,
+  LED-count detection `FA 14`, voltage/power `FC 1A`.
+- ⚠ Never send `FD` (jump to bootloader) or `81/83/84` (bootloader/OTA). Not implemented, by decision.
+
+## Feature catalog (NollieRGB 2.3.0 device pages → OpenNollie)
+
+| App page | Features | Status |
+|---|---|---|
+| Home / Basic settings | controller name; fw version; boot playlist (Start effect: start canvas; Loop effect: HW effects / FSEQ loop / FSEQ once); direct-drive idle timeout; (GPIO: not on 16CH) | [ ] |
+| Loop canvas / Boot canvas | add/delete/edit canvases, drag channels into canvases, per-canvas effect + params (brightness, speed, size, delay, frame delay, vmap process, palette, blend, colors 1–3), loop FPS, start FPS | [ ] |
+| LED settings | per-channel LED count, component presets (`Components/*.json`, `vmap/*.json`), LED order (first/reverse) = vmap, vmap name, **auto-detect LED count** | [ ] |
+| Palette editor | 8 groups × 16 colors; import/export JSON | [ ] |
+| FSEQ player | upload FSEQ to flash (erase/write/verify), channel map, play/stop/loop | [ ] |
+| Device info | canvas overview, power (rails V/I), MCU temp/load, flash chip ID, ROM state, write count, stored FSEQ size | [ ] |
+| Backup | export/import config JSON, factory reset, restart | [ ] |
+| Power test | per-channel current measurement, CSV export | [ ] |
+| Identify | light one channel red (`make_ch`) | [ ] |
+| **OpenNollie extras** | live per-channel colors; **software effects engine** (any user-defined effect) streamed live, or **rendered to FSEQ and stored on the device** | [ ] |
 
 ## Architecture (decided)
 
-**Python 3 + hidapi + PySide6 (Qt)**. It iterates fast during reverse engineering, an effects
-loop at 30–60 FPS on 16 channels needs very little CPU, and Qt fits KDE/CachyOS.
+**Python 3 + hidapi + PySide6 (Qt)**.
 
 ```
 opennollie/
-  protocol.py    # byte-level packet builders
-  device.py      # hidapi transport: open, channel config, send frame, save-to-device
-  effects/       # effect plugins: f(t, channel_cfg) -> list[RGB]
-  engine.py      # frame loop, layering, per-channel / global assignment
-  config.py      # profiles in ~/.config/opennollie/*.toml
-  daemon.py      # systemd --user service; owns the device; local socket/D-Bus API
-  cli.py         # `opennollie set ch3 ff0000`, `opennollie effect rainbow --all`, `opennollie save`
-  gui/           # Qt app; talks to the daemon
-packaging/       # 70-opennollie.rules (udev; <73 so uaccess applies), opennollie.service, PKGBUILD
-tools/           # capture.sh, decode_pcap.py (RE helpers)
-captures/        # .pcapng files from the RE sessions
-docs/PROTOCOL.md # protocol documentation
+  protocol.py    # fw 2.3.0 command builders + response parsers (pure, no I/O)
+  device.py      # hidapi transport (if0), request/response, high-level ops
+  model.py       # DeviceConfig dataclasses mirroring the device state; read_all / diff / write
+  flash.py       # F4 flash ops + FSEQ upload/verify (mirrors app n_usb_flash_mixin / fseq_upload_service)
+  fseq.py        # FSEQ v2 reader/writer
+  effects/       # software effects: f(t, channel ctx) -> colors; also rendered to FSEQ
+  engine.py      # live frame loop (OL mode)
+  daemon.py      # systemd --user service owning the device; local API for GUI/CLI
+  cli.py         # `opennollie …`
+  gui/           # Qt app with the pages above
+packaging/       # 70-opennollie.rules, opennollie.service, PKGBUILD
+tools/           # setup-dev.sh, capture.sh, vm-follow-nollie.sh, re/ (pyi_extract.py, disasm.py)
+captures/        # .pcapng from RE sessions (gitignored)
+vendor-app/      # official app + extracted bytecode (gitignored, never commit)
+docs/PROTOCOL.md
 ```
 
-**Lighting modes**
-- **Software mode**: the daemon streams frames, so any user-designed effect works.
-- **Hardware (saved) mode**: limited to what the firmware can store, probably static colors
-  plus built-in effects with parameters. Map our effects onto those where possible. Whether the
-  firmware can store custom animations is still unknown (see Open questions).
+Saved lighting has two layers: **(a)** built-in HW effects on canvases (cheap, firmware-rendered), and
+**(b)** custom effects from our engine, rendered to FSEQ and stored in flash, which plays with no host.
 
 ## Roadmap & status
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ### Phase 0: Environment ✅ (2026-10-10)
-- [x] Rebind `usbhid` to the Nollie (`tools/setup-dev.sh bind`). It's now `/dev/hidraw11`, user rw via uaccess ACL
-- [x] udev rule `packaging/70-opennollie.rules` (for packaging; OpenRGB's `60-openrgb.rules` already grants `uaccess` for `3061:4716` on this machine)
-- [x] Install wireshark-cli, load `usbmon`, user capture access (`tools/setup-dev.sh usbmon`, once per boot; `tools/capture.sh` records)
-- [x] Python deps from pacman: `python-hidapi` 0.14 (module `hid`, hidraw backend), `pyside6` 6.11. No venv
-- [x] `git init`
+- [x] udev/hidraw access, usbmon capture tooling, Python deps from pacman, git
 
-### Phase 1: Baseline live control ✅ (2026-10-10)
-- [x] Read OpenRGB's Nollie controller source → `docs/PROTOCOL.md`
-- [x] `opennollie/protocol.py` (packet builders) + `device.py` (hidapi) + `cli.py` (`set`, `off`, `identify`)
-      with unit tests (`python3 -m unittest discover tests`)
-- [x] LED count per channel: N/A as a separate command; on the 16CH the count is part of every packet
-- [x] Verified on wire (capture) and on hardware: all fans + GPU showed dim blue, so GRB order is correct
-- [x] Map ports to physical devices (`identify`). See **Port map**. Board labels aren't visible (case closed)
-- [x] Device holds the last frame after the host stops sending (several minutes observed); no keep-alive needed
+### Phase 1: Baseline live control (legacy fw) ✅ (2026-10-10)
+- [x] OpenRGB-derived live protocol; CLI `set`/`off`/`identify`; port map verified on hardware
+- Superseded by the firmware update. Legacy fw code is removed from `main`, kept in git history (`0127bce`).
 
-### Phase 2: Capture sessions (Windows app in the VM, sniffed on the host)
-One action per capture, about 3 s between steps:
-- [ ] `01_startup`: launch the app, 10 s idle (handshake, version query)
-- [ ] `02_static_ch1_red`: ch1 static red, then green, then blue
-- [ ] `03_static_ch2`: ch2 static white (channel addressing)
-- [ ] `04_ledcount`: change the ch1 LED count (10 → 20)
-- [ ] `05_brightness`: global brightness 100 → 50
-- [ ] `06_effect_*`: each built-in effect, then change its speed and color
-- [ ] `08_save_static`: static colors on 2–3 channels → **Save to device**
-- [ ] `09_save_effect`: effect → **Save to device**
-- [ ] Observation: does the saved lighting come back after a reboot with the VM off?
-- [x] Got the vendor app (NollieRGB v2.3.0 portable, in `vendor-app/`, gitignored). It's PyInstaller/Python 3.11, so
-      it decompiles to readable bytecode; see `docs/PROTOCOL.md` § Vendor app analysis. Tools: `tools/re/`
-- [x] Firmware updated to current fw via the official app (2026-10-10). The device is now `16d5:2a16`
+### Phase 2: Reverse engineering ✅ (2026-10-10)
+- [x] Vendor app NollieRGB 2.3.0 decompiled (PyInstaller, Py 3.11), with the full protocol from bytecode
+- [x] Firmware updated to 2.3.0 via the official app (captured: `captures/fw_update_2.3.0.pcapng`)
+- [x] Capture of the user exploring every page on the new fw (same file, USB addr 7, t≈232–957 s)
+- [x] Read-only queries from Linux match the app (mode, version, canvases, LED counts)
 
-### Phase 3: Protocol
-- [ ] Decode captures → `docs/PROTOCOL.md`
-- [ ] Implement in `protocol.py`, replay each command from Linux, verify on hardware
-- [ ] Save-to-device works from Linux
+### Phase 3: Protocol library (fw 2.3.0)
+- [ ] `docs/PROTOCOL.md`: rewrite for fw 2.3.0 (all commands, payloads, responses, sequences from capture)
+- [ ] `protocol.py` + `device.py`: request/response, all GET/SET except OTA; unit tests vs captured bytes
+- [ ] `model.py`: read full device config (`opennollie info` / `dump`); verify on hardware (read-only)
+- [ ] Writes, one feature at a time, each verified on hardware: mode, canvas params, canvas maps, LED counts,
+      palettes, FPS, boot playlist, idle timeout, name, vmap
+- [ ] Live streaming (OL) + identify
+- [ ] LED-count auto-detection, voltage/power, device info
+- [ ] Flash ops + FSEQ upload/play (read the app's flash code fully first; verify with CRC)
+- [ ] Backup/restore JSON (compatible with the app's export format if practical), factory reset, reboot
 
-### Phase 4: Headless product
-- [ ] Effects engine + built-in effects (static, breathing, rainbow, wave, gradient, …)
-- [ ] User-defined effects (config-driven)
-- [ ] Config/profiles (TOML)
-- [ ] Daemon (systemd user service) + CLI
+### Phase 4: Effects engine + headless product
+- [ ] Software effects (static, breathe, rainbow, wave, gradient, …), user-defined (config-driven)
+- [ ] Live streaming engine; render-to-FSEQ for save-to-device
+- [ ] Profiles (TOML), daemon (systemd user service), full CLI
 
-### Phase 5: GUI
-- [ ] Qt app: channel list, color pickers, effect editor, live preview, Save to device
+### Phase 5: GUI (PySide6)
+- [ ] Pages mirroring the feature catalog + our effects editor and live preview
 
 ### Phase 6: Packaging
 - [ ] PKGBUILD, udev rule, systemd unit, README
 
 ## Open questions
-- ~~Legacy firmware~~ Resolved 2026-10-10: updated to current fw (16d5:2a16). Background kept below for reference.
-- **Firmware (was): our Nollie ran LEGACY firmware (`Nollie16_old`, 3061:4716).** App v2.3.0 forces an OTA update for
-  legacy devices and only supports save-to-device / effects / FSEQ on the current firmware (16D5:2A16). The VM has
-  NollieRGB **1.0** (old app). Recommended: update via the official v2.3.0 app in the VM, never from our tool.
-  OTA flow: app → `0xFD` jump-BL → device re-enumerates as **3061:f037** (bootloader) → PROM + VERIFY (CRC) → reboot
-  as **16d5:2a16**. A CRC failure leaves it in the bootloader, and the app can re-flash it (recoverable).
-  The VM (`win10`, libvirt) passes through by ID 3061:4716 only, so run `tools/vm-follow-nollie.sh` during the update
-  to hot-attach the new IDs.
-- LED count per device? Not needed yet: we drive 256 LEDs/port and the extra data is ignored.
-- Windows app name and version? Is it .NET or Electron, i.e. can it be decompiled?
-- Which effects can the firmware store? Can it store custom or keyframe animations, or only
-  built-in ones?
-- Do OpenRGB's port numbers match the labels printed on the board? Unknown (case closed); doesn't matter in practice.
+- What's on interface 1 (keyboard, 8 B IN)? Probably irrelevant.
+- Real LED counts per fan/GPU: use the firmware's auto-detect (`FA 14`) once implemented.
+- Do the canvas colors in `CH_PARAM` go out as GRB or RGB? Check the app's UI code before writing colors.
+- How does mode SL (2) differ from HW?
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
-- 2026-10-10 23:29: **Firmware updated** with the official NollieRGB v2.3.0 in the VM. 3061:4716 → bootloader 3061:f037
-  (attached 23:29:03) → **16d5:2a16** (23:29:27), same serial `00B7FE6232DC30F6`. New fw exposes 2 HID interfaces:
-  if0 = 1024 B IN/OUT (RGB protocol), if1 = 8 B IN only (unknown). The user reports the app shows success.
-  The capture (16 min, 36k pkts) also has the user's exploration of v2.3.0 on the new fw (USB addr 7, ~23:29–23:44).
-  Gotcha: every device reset re-enumerates with a new USB address, which leaves the VM's hostdev stale.
-  `vm-follow-nollie.sh` now replaces stale entries. (source: captures/fw_update_2.3.0.pcapng, lsusb)
-- 2026-10-10: Vendor app v2.3.0 = PyInstaller (Py 3.11). Full current-firmware protocol recovered from bytecode
-  (commands 0xF2–0xFF: effects, palettes, boot playlist, idle fallback, flash, FSEQ animations). Our device is
-  `Nollie16_old`; the app sends legacy devices straight to OTA update. `config/Nollie16.bin` = RISC-V firmware image.
-  OpenRGB's udev rules already cover the post-update ID 16d5:2a16. (source: vendor-app/dis2)
-- 2026-10-10: Port → device mapping done via `identify` (see Port map); ports 1-3, 10, 11 are unused.
-  (source: user observation)
-- 2026-10-10: Hardware test passed: `set all blue --brightness 30` turned all fans and the GPU dim blue, and the colors
-  stayed after the program exited, so the device holds the last frame. GPU is on port 9 (OpenRGB "Channel 9"), with
-  the GPU's own ARGB set to external sync. (source: user observation)
-- 2026-10-10: Live protocol (from OpenRGB): one 1024 B packet per port `[wire_ch, flag, cnt_hi, cnt_lo, GRB...]`,
-  wire channels 16..31, ascending, ch 31 always last with flag 2 (latch?). Our encoder matches on the wire.
-  The device sends no IN reports during live updates. (source: OpenRGB b190d3e, captures/p1_set_all_blue.pcapng)
-- 2026-10-10: OpenRGB config has the Nollie with all 16 zones at 0 LEDs, so no LED counts are known yet. (source: ~/.config/OpenRGB)
-- 2026-10-10: Host usbmon capture verified: every Nollie URB on bus 1 is recorded. (source: capture self-test)
-- 2026-10-10: HID descriptor gives 1024 B output / 64 B input reports, vendor page 0xFF00, no report IDs.
-  (source: sysfs report_descriptor)
-- 2026-10-10: `/usr/lib/udev/rules.d/60-openrgb.rules` already tags `3061:4716` with `uaccess`, so no extra
-  udev rule is needed on this machine. (source: grep)
-- 2026-10-10: `sudo` needs a password, so privileged steps go through `tools/setup-dev.sh`, which the user runs.
-  Commands typed by the Terminal-panel tool get lost while fish starts up, so the user runs them by hand.
-- 2026-10-10: Device enumerates as `3061:4716`, OUT EP is 1024 B, no host driver bound
-  (passthrough left it detached). (source: lsusb, sysfs)
+- 2026-10-10: **fw 2.3.0 verified from Linux (read-only)**: `FC 01` → ver 19 / hw 165, `FC 02` → 2.3.0, mode 1 (HW),
+  1 canvas × 16 ch running effect 2 (Breath), LED num 256 per channel, idle 0, boot playlist 0/0, which are the
+  factory defaults after the user's reset. if1 is a HID keyboard. (source: hidapi on host)
+- 2026-10-10: The capture of the user exploring the app shows: config edits are pushed immediately with no save
+  step; LED count `FA 08`; vmap `F8` and name `F6 07`; all 23 effects + brightness sliders `FA 02`; FPS `FA 06`;
+  boot canvas 14 + `FA 0B/05/04`; `FA 20` after boot-canvas edits; idle `F6 16`; factory reset `FA 21` at the end.
+  Live preview streams frames without switching mode first, then sends `FA 01 01` to go back to HW.
+  (source: captures/fw_update_2.3.0.pcapng)
+- 2026-10-10 23:29: **Firmware updated** with the official NollieRGB v2.3.0 in the VM: 3061:4716 → bootloader
+  3061:f037 → 16d5:2a16 (24 s). The VM shut down cleanly at ~23:44. Gotcha: every device reset re-enumerates with a new
+  USB address, which leaves the VM's hostdev stale; `vm-follow-nollie.sh` handles it. (source: capture, lsusb)
+- 2026-10-10: Vendor app v2.3.0 = PyInstaller (Py 3.11). The app routes legacy devices straight to OTA update.
+  `config/Nollie16.bin` = RISC-V firmware image. (source: vendor-app/dis2)
+- 2026-10-10: Legacy-fw era: live protocol from OpenRGB worked; the device held the last frame; ports mapped by
+  `identify`. (source: hardware tests)
+- 2026-10-10: `sudo` needs a password, so privileged steps go through scripts the user runs. Commands typed by the
+  Terminal-panel tool get lost while fish starts up, so the user runs them by hand.
 
 ## Decision log
 <!-- Newest first. Format: YYYY-MM-DD: decision; reason -->
+- 2026-10-10: Target **fw 2.3.0 only**; legacy-fw code removed (in git history). Reason: the user's device is updated,
+  and the scope is this machine.
+- 2026-10-10: Goal expanded to **parity with NollieRGB 2.3.0** plus our software effects engine (user request).
 - 2026-10-10: OpenNollie will **not** implement firmware updates; it's left to the official app. Reasons: brick risk
   from our own bugs, the firmware binary can't be redistributed, and it's a one-time operation.
-- 2026-10-10: Python + hidapi + PySide6; fast iteration during RE, light enough CPU use, Qt fits CachyOS/KDE.
-- 2026-10-10: Sniff USB on the host via usbmon rather than USBPcap in Windows; libvirt passthrough traffic is visible on the host.
-- 2026-10-10: Use OpenRGB's Nollie driver as the reference for the live protocol; reverse engineer only save-to-device and hardware effects.
+- 2026-10-10: Python + hidapi + PySide6.
+- 2026-10-10: Sniff USB on the host via usbmon; libvirt passthrough traffic is visible there.
 
 ## Working conventions
-- Ask the user before any `sudo` command or system change (packages, udev, modules).
-- Keep this file current: update the status checkboxes, the findings log and the decision log
-  in the same session the work happens.
-- Hardware writes, especially save-to-device and anything touching flash, are replayed
-  only from captured, understood packets. Never fuzz unknown commands at the device.
+- Ask the user before any `sudo` command or system change (packages, udev, modules, VM config).
+- Keep this file current: update status, findings and decisions in the same session the work happens.
+- Hardware writes follow the vendor app's exact packets (bytecode + capture). Never fuzz unknown commands.
+  Read-only GETs first; verify each SET by reading it back. Flash ops only after reading the app's code fully.
+- Never send bootloader/OTA commands (`FD`, `81`, `83`, `84`).
+- The vendor app is proprietary: keep it and its extracted code out of git; our code is written fresh from the
+  documented protocol, not copied.
