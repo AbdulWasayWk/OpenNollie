@@ -128,6 +128,33 @@ START_EFFECTS = (
     "Light up", "Color wipe", "Slowly wipe", "Pull flower", "Stackab1", "Stackab2", "Stackab3", "Bullets",
 )
 
+# Which settings each built-in effect uses (from the NollieRGB 2.3.0 effect catalog). Keys: brightness, step
+# (speed), size, delay, frame_delay, color1..3, palette (palette group), blend, vmap (follow LED order).
+_WIPE = {"frame_delay", "size", "vmap", "delay", "color2", "step", "color3", "brightness", "color1"}
+_WAVE = {"frame_delay", "size", "vmap", "delay", "step", "color3", "brightness", "color1"}
+_BULLETS = {"size", "vmap", "delay", "step", "color3", "brightness", "color1"}
+EFFECT_PARAMS: dict[str, set[str]] = {
+    "Off": set(),
+    "Solid": {"color3", "vmap", "brightness", "color1"},
+    "Breath": {"vmap", "delay", "step", "color3", "brightness", "color1"},
+    "Scanning": {"size", "vmap", "delay", "step", "color3", "brightness", "color1"},
+    "Rainbow": {"vmap", "delay", "step", "color3", "brightness"},
+    "Rainbow cycle": {"size", "vmap", "delay", "step", "color3", "brightness"},
+    "Meteor": {"size", "vmap", "delay", "color2", "step", "color3", "brightness", "color1"},
+    "Shake": {"size", "vmap", "delay", "step", "color3", "brightness", "color1"},
+    "Slowly wipe": _WIPE, "Color wipe": _WIPE,
+    "Rainbow strip": {"size", "vmap", "delay", "step", "color3", "brightness"},
+    "Rainbow strip l": {"size", "vmap", "delay", "step", "color3", "brightness"},
+    "Wave": _WAVE, "Sunny": _WAVE, "Pull flower": _WAVE,
+    "Stackab1": _WIPE, "Stackab2": _WIPE, "Stackab3": _WIPE, "Integration1": _WIPE, "Integration2": _WIPE,
+    "Interchange": _WIPE,
+    "Bullets": _BULLETS, "Sequence": _BULLETS,
+    "ColorFromPalette": {"palette", "size", "vmap", "delay", "step", "color3", "brightness", "blend"},
+    "Light up": {"step", "brightness", "color1"},
+}
+# Setting ranges used by the official app's sliders.
+PARAM_RANGES = {"brightness": (0, 100), "step": (1, 10), "size": (0, 50), "delay": (0, 8), "frame_delay": (1, 255)}
+
 # Voltage report (GET_CONFIG VOLTAGE) for the 16CH: (field, u16 index, scale, unit).
 VOLTAGE_FIELDS = (
     ("input_voltage", 0, 0.001, "V"),

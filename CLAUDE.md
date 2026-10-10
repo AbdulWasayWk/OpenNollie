@@ -97,7 +97,7 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 | App page | Features | Status |
 |---|---|---|
 | Home / Basic settings | controller name; fw version; boot playlist; direct-drive idle timeout; (GPIO: not on 16CH) | [x] GUI Device page + CLI |
-| Loop canvas / Boot canvas | canvases, ports per canvas, per-canvas effect + params, loop/start FPS | [x] loop canvases verified on hw; [ ] boot canvases (14+) not yet hw-tested |
+| Loop canvas / Boot canvas | canvases, ports per canvas, per-canvas effect + params (incl. palette group, blend, frame delay), loop/start FPS | [x] Built-in effects page reworked (2026-10-11): "groups", tabs Normal lighting / Startup animation, only the settings each effect uses (`protocol.EFFECT_PARAMS`), applies as you edit (diff-only writes). Tested vs the simulated controller; [ ] boot canvases not yet hw-tested |
 | LED settings | LED count per port, names | [x] |
 | LED settings | LED order remap (vmap), component/vmap presets | [x] `layouts.py`, Ports page "LED order", CLI `order`; our engine applies the order to live/stored effects itself (fw only applies it to built-in effects with vmap_process) |
 | LED settings | auto-detect LED count | N/A on 16CH (fw lacks it); our `ledtest` replaces it |
@@ -228,6 +228,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
       Save/Discard/Cancel on unsaved changes, examples read-only; autosave + reopen last session (user requests)
 - [x] Restore from backup JSON; LED-order (vmap) editor + component presets; tray icon / quick profile switch
 - [x] Settings page: tray / service start at login (`autostart.py`) (user request 2026-10-11)
+- [x] Built-in effects page reworked for clarity (user: canvases confusing): effect groups, two tabs, per-effect
+      settings, palette/blend/frame delay, live apply with diff-only writes, banner when a studio animation is active
 - [x] Editable case layout (`caselayout.py`, `~/.config/opennollie/layout.json`, GUI Layout page): fans/strips,
       drag to arrange, port + first LED + LED count per item (daisy chains), size/angle/name, light-it-up; studio
       preview uses it. The previously hard-coded layout of this machine was migrated into the user's layout.json
@@ -306,6 +308,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Decision log
 <!-- Newest first. Format: YYYY-MM-DD: decision; reason -->
+- 2026-10-11: Built-in effects apply **as you edit** (debounced 600 ms, only changed pieces written), like the official
+  app; firmware "canvases" are presented as "groups". Colors are named "Color 1/2/3" (what color 3 does isn't known).
+- 2026-10-11: The case picture is user data (`layout.json`), not code; new installs start from an automatic layout.
 - 2026-10-11: "Save to device" **writes immediately** (user's choice) and accepts the ~2 s firmware LED pause for new
   animations. Rejected: deferring the flash write to shutdown/logout while the daemon plays the effect live.
 - 2026-10-11: Studio autosaves the edited profile (`~/.local/state/opennollie/studio.toml`) and reopens it on start

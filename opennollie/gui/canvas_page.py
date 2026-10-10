@@ -1,140 +1,271 @@
-"""Built-in effects page: the controller's own canvases (loop and boot)."""
+"""Built-in effects page: the controller's own effects, as groups of ports (the firmware calls them
+canvases). Normal lighting runs all the time; the startup animation plays once at power-on.
+Changes are written to the controller as you make them (only what changed)."""
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
-                               QScrollArea, QSlider, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                               QPushButton, QScrollArea, QSlider, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import protocol as p
-from ..flash import Flash
-from ..protocol import CanvasLayout, CanvasParams, Mode
+from ..protocol import BootIntro, BootSteady, CanvasLayout, CanvasParams, Mode
 from .common import ColorButton, Device, PortPicker, error, hbox
 
-FPS_CHOICES = [(8, "120 fps"), (11, "90 fps"), (16, "60 fps"), (20, "50 fps"), (25, "40 fps"), (33, "30 fps"),
-               (50, "20 fps"), (100, "10 fps")]
+FPS_CHOICES = [(8, "Very smooth (120 fps)"), (16, "Smooth (60 fps)"), (33, "Normal (30 fps)"), (50, "20 fps"),
+               (100, "10 fps")]
+COLOR_NAMES = {"color1": "Color 1", "color2": "Color 2", "color3": "Color 3"}
 
 
-class CanvasCard(QFrame):
-    """One canvas: its ports, firmware effect and settings."""
+@dataclass
+class GroupState:
+    ports: list[int]
+    params: CanvasParams
+    frame_delay: int = 33
+    palette: int = 0
+    blend: int = 0
 
+
+@dataclass
+class EffectsState:
+    """Everything this page controls, as on the controller."""
+    loop: list[GroupState] = field(default_factory=list)
+    boot: list[GroupState] = field(default_factory=list)
+    loop_ms: int = 33
+    boot_ms: int = 16
+    startup_on: bool = True
+    builtin_active: bool = True
+    arrays: dict = field(default_factory=dict)       # frame_delay / dynamic_1 / dynamic_2 as on the device
+
+
+def _slider(lo: int, hi: int, value: int) -> tuple[QWidget, QSlider]:
+    s = QSlider(Qt.Horizontal)
+    s.setRange(lo, hi)
+    s.setValue(max(lo, min(hi, value)))
+    s.setMinimumWidth(160)
+    s.setMaximumWidth(460)
+    lab = QLabel(str(s.value()))
+    lab.setMinimumWidth(28)
+    s.valueChanged.connect(lambda v: lab.setText(str(v)))
+    return hbox(s, lab, stretch=False), s
+
+
+class GroupCard(QFrame):
+    """One group of ports with one built-in effect. Shows only the settings that effect uses."""
+
+    changed = Signal()
     remove = Signal(object)
     ports_changed = Signal()
 
-    def __init__(self, index: int, boot: bool, params: CanvasParams, ports: list[int], labels: dict[int, str]):
+    def __init__(self, boot: bool, g: GroupState, labels: dict[int, str]):
         super().__init__()
-        self.boot = boot
+        self.boot, self.base = boot, g.params
         self.setFrameShape(QFrame.StyledPanel)
-        self.params = params
         lay = QVBoxLayout(self)
+
         head = QHBoxLayout()
         self.title = QLabel()
-        head.addWidget(self.title)
-        head.addStretch(1)
-        rm = QPushButton("Remove")
+        self.effect = QComboBox()
+        self.effect.addItems(p.START_EFFECTS if boot else p.EFFECTS)
+        self.effect.setCurrentIndex(min(g.params.effect, self.effect.count() - 1))
+        self.effect.setMinimumWidth(180)
+        rm = QPushButton("Remove group")
         rm.clicked.connect(lambda: self.remove.emit(self))
+        head.addWidget(self.title)
+        head.addWidget(self.effect)
+        head.addStretch(1)
         head.addWidget(rm)
         lay.addLayout(head)
-        self.set_index(index)
 
         form = QFormLayout()
         self.picker = PortPicker(labels)
-        self.picker.set_ports(ports)
-        self.picker.changed.connect(lambda _: self.ports_changed.emit())
+        self.picker.set_ports(g.ports)
+        self.picker.changed.connect(lambda _: (self.ports_changed.emit(), self.changed.emit()))
         form.addRow("Ports", self.picker)
-        self.effect = QComboBox()
-        self.effect.addItems(p.START_EFFECTS if boot else p.EFFECTS)
-        self.effect.setCurrentIndex(min(params.effect, self.effect.count() - 1))
-        form.addRow("Effect", self.effect)
-        self.brightness = QSlider(Qt.Horizontal)
-        self.brightness.setRange(0, 100)
-        self.brightness.setValue(params.brightness)
-        form.addRow("Brightness", self.brightness)
-        self.step, self.size, self.delay = QSpinBox(), QSpinBox(), QSpinBox()
-        for w, v in ((self.step, params.step), (self.size, params.size), (self.delay, params.delay)):
-            w.setRange(0, 255)
-            w.setValue(v)
-        form.addRow("Speed / size / delay", hbox(self.step, self.size, self.delay))
-        self.colors = [ColorButton(params.color1), ColorButton(params.color2), ColorButton(params.color3)]
-        form.addRow("Colors", hbox(*self.colors))
-        self.vmap = QCheckBox("Follow each port's LED order (Ports && LEDs → LED order)")
-        self.vmap.setChecked(bool(params.vmap_process))
-        form.addRow("", self.vmap)
+        rng = p.PARAM_RANGES
+        self.rows: dict[str, QWidget] = {}
+        self.sliders: dict[str, QSlider] = {}
+        for key, label, value in (("brightness", "Brightness", g.params.brightness), ("step", "Speed", g.params.step),
+                                  ("size", "Size", g.params.size)):
+            row, s = _slider(*rng[key], value)
+            self.rows[key], self.sliders[key] = row, s
+            form.addRow(label, row)
+        self.colors = {k: ColorButton(getattr(g.params, k)) for k in ("color1", "color2", "color3")}
+        self.color_labels = {k: QLabel(f"<small>{COLOR_NAMES[k]}</small>") for k in self.colors}
+        colors_row = QWidget()
+        cl = QHBoxLayout(colors_row)
+        cl.setContentsMargins(0, 0, 0, 0)
+        for k, b in self.colors.items():
+            cl.addWidget(b)
+            cl.addWidget(self.color_labels[k])
+            cl.addSpacing(8)
+        cl.addStretch(1)
+        self.rows["colors"] = colors_row
+        form.addRow("Colors", colors_row)
+        self.palette = QComboBox()
+        for i in range(p.PALETTE_GROUPS):
+            self.palette.addItem(f"Palette {i + 1} (Palettes page)", i)
+        self.palette.setCurrentIndex(g.palette & 7)
+        self.blend = QCheckBox("Blend smoothly between palette colors")
+        self.blend.setChecked(bool(g.blend))
+        self.rows["palette"], self.rows["blend"] = self.palette, self.blend
+        form.addRow("Palette", self.palette)
+        form.addRow("", self.blend)
         lay.addLayout(form)
 
+        self.more_btn = QToolButton()
+        self.more_btn.setText("More settings")
+        self.more_btn.setCheckable(True)
+        self.more_btn.setArrowType(Qt.RightArrow)
+        self.more_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.more_btn.setAutoRaise(True)
+        lay.addWidget(self.more_btn)
+        self.more = QWidget()
+        mf = QFormLayout(self.more)
+        mf.setContentsMargins(16, 0, 0, 0)
+        row, self.sliders["delay"] = _slider(*rng["delay"], g.params.delay)
+        self.rows["delay"] = row
+        mf.addRow("Delay", row)
+        row, self.sliders["frame_delay"] = _slider(*rng["frame_delay"], g.frame_delay)
+        self.rows["frame_delay"] = row
+        mf.addRow("Frame time (ms)", row)
+        self.vmap = QCheckBox("Follow each port's LED order (Ports && LEDs → LED order)")
+        self.vmap.setChecked(bool(g.params.vmap_process))
+        self.rows["vmap"] = self.vmap
+        mf.addRow("", self.vmap)
+        lay.addWidget(self.more)
+        self.more.setVisible(False)
+        self.more_btn.toggled.connect(lambda on: (self.more.setVisible(on),
+                                                  self.more_btn.setArrowType(Qt.DownArrow if on else Qt.RightArrow)))
+        self.form, self.more_form = form, mf
+
+        self.effect.currentIndexChanged.connect(self._effect_changed)
+        for s in self.sliders.values():
+            s.valueChanged.connect(lambda _: self.changed.emit())
+        for b in self.colors.values():
+            b.changed.connect(lambda _: self.changed.emit())
+        self.palette.currentIndexChanged.connect(lambda _: self.changed.emit())
+        self.blend.toggled.connect(lambda _: self.changed.emit())
+        self.vmap.toggled.connect(lambda _: self.changed.emit())
+        self._effect_changed(emit=False)
+
     def set_index(self, i: int) -> None:
-        base = p.BOOT_CANVAS_BASE if self.boot else 0
-        self.title.setText(f"<b>{'Boot' if self.boot else 'Loop'} canvas {i + 1}</b>  <small>(#{base + i})</small>")
+        self.title.setText(f"<b>Group {i + 1}</b>")
 
-    def value(self) -> tuple[list[int], CanvasParams]:
-        params = replace(self.params, effect=self.effect.currentIndex(), brightness=self.brightness.value(),
-                         step=self.step.value(), size=self.size.value(), delay=self.delay.value(),
-                         vmap_process=int(self.vmap.isChecked()),
-                         color1=self.colors[0].color(), color2=self.colors[1].color(), color3=self.colors[2].color())
-        return self.picker.ports(), params
+    def _show_row(self, form: QFormLayout, w: QWidget, visible: bool) -> None:
+        w.setVisible(visible)
+        lab = form.labelForField(w)
+        if lab:
+            lab.setVisible(visible)
+
+    def _effect_changed(self, *_, emit: bool = True) -> None:
+        uses = p.EFFECT_PARAMS.get(self.effect.currentText(), set())
+        for key in ("brightness", "step", "size", "palette", "blend"):
+            self._show_row(self.form, self.rows[key], key in uses)
+        for key in ("delay", "frame_delay", "vmap"):
+            self._show_row(self.more_form, self.rows[key], key in uses)
+        used_colors = [k for k in self.colors if k in uses]
+        for k in self.colors:
+            self.colors[k].setVisible(k in uses)
+            self.color_labels[k].setVisible(k in uses and (len(used_colors) > 1 or k != "color1"))
+        self._show_row(self.form, self.rows["colors"], bool(used_colors))
+        self.more_btn.setVisible(bool(uses & {"delay", "frame_delay", "vmap"}))
+        if emit:
+            self.changed.emit()
+
+    def value(self) -> GroupState:
+        s = self.sliders
+        params = replace(self.base, effect=self.effect.currentIndex(), brightness=s["brightness"].value(),
+                         step=s["step"].value(), size=s["size"].value(), delay=s["delay"].value(),
+                         vmap_process=int(self.vmap.isChecked()), color1=self.colors["color1"].color(),
+                         color2=self.colors["color2"].color(), color3=self.colors["color3"].color())
+        return GroupState(self.picker.ports(), params, s["frame_delay"].value(), self.palette.currentData(),
+                          int(self.blend.isChecked()))
 
 
-class CanvasSection(QGroupBox):
-    def __init__(self, title: str, boot: bool, labels: dict[int, str]):
-        super().__init__(title)
-        self.boot = boot
-        self.labels = labels
-        self.cards: list[CanvasCard] = []
+class GroupList(QWidget):
+    """The groups of one kind (normal lighting or startup animation)."""
+
+    changed = Signal()
+
+    def __init__(self, boot: bool, labels: dict[int, str]):
+        super().__init__()
+        self.boot, self.labels = boot, labels
+        self.cards: list[GroupCard] = []
         lay = QVBoxLayout(self)
+        self.box = QVBoxLayout()
+        lay.addLayout(self.box)
+        self.add_btn = QPushButton("+ Add a group")
+        self.add_btn.clicked.connect(lambda: self.add(GroupState([], CanvasParams(vmap_process=1)), emit=True))
+        self.free = QLabel()
+        self.free_btn = QPushButton("Put them in a new group")
+        self.free_btn.clicked.connect(self._group_free)
+        lay.addWidget(hbox(self.add_btn))
+        lay.addWidget(hbox(self.free, self.free_btn))
         self.fps = QComboBox()
         for ms, label in FPS_CHOICES:
             self.fps.addItem(label, ms)
-        add = QPushButton("Add canvas")
-        add.clicked.connect(lambda: self.add(CanvasParams(vmap_process=1), []))
-        lay.addWidget(hbox("Frame rate", self.fps, add))
-        self.box = QVBoxLayout()
-        lay.addLayout(self.box)
+        self.fps.currentIndexChanged.connect(lambda _: self.changed.emit())
+        lay.addWidget(hbox("Animation frame rate", self.fps))
+        lay.addStretch(1)
 
-    def set(self, layout: CanvasLayout, params: list[CanvasParams], frame_ms: int) -> None:
+    def set(self, groups: list[GroupState], frame_ms: int) -> None:
         for c in list(self.cards):
-            self._remove(c)
-        for chans, prm in zip(layout.canvases, params):
-            self.add(prm, [p.CH_TO_PORT[ch] for ch in chans])
+            self._remove(c, emit=False)
+        for g in groups:
+            self.add(g, emit=False)
+        self.fps.blockSignals(True)
         i = self.fps.findData(frame_ms)
         if i < 0:
             self.fps.addItem(f"{1000 / max(frame_ms, 1):.0f} fps", frame_ms)
             i = self.fps.count() - 1
         self.fps.setCurrentIndex(i)
+        self.fps.blockSignals(False)
+        self._sync()
 
-    def add(self, params: CanvasParams, ports: list[int]) -> None:
+    def add(self, g: GroupState, emit: bool = True) -> None:
         limit = p.BOOT_CANVAS_MAX if self.boot else p.LOOP_CANVAS_MAX
         if len(self.cards) >= limit:
-            error(self, "Canvases", f"At most {limit} {'boot' if self.boot else 'loop'} canvases.")
-            return
-        card = CanvasCard(len(self.cards), self.boot, params, ports, self.labels)
+            return error(self, "Groups", f"The controller allows at most {limit} groups here.")
+        card = GroupCard(self.boot, g, self.labels)
         card.remove.connect(self._remove)
-        card.ports_changed.connect(self._sync_disabled)
+        card.ports_changed.connect(self._sync)
+        card.changed.connect(self.changed)
         self.cards.append(card)
         self.box.addWidget(card)
-        self._sync_disabled()
+        self._sync()
+        if emit:
+            self.changed.emit()
 
-    def _remove(self, card: CanvasCard) -> None:
+    def _remove(self, card: GroupCard, emit: bool = True) -> None:
         self.cards.remove(card)
         card.setParent(None)
         card.deleteLater()
-        for i, c in enumerate(self.cards):
-            c.set_index(i)
-        self._sync_disabled()
+        self._sync()
+        if emit:
+            self.changed.emit()
 
-    def _sync_disabled(self) -> None:
-        """A port can be in only one canvas."""
-        for card in self.cards:
+    def _sync(self) -> None:
+        """Number the groups, keep each port in one group, show which ports are left over."""
+        for i, card in enumerate(self.cards):
+            card.set_index(i)
             others = {pt for c in self.cards if c is not card for pt in c.picker.ports()}
             card.picker.set_ports(card.picker.ports(), others)
+        used = {pt for c in self.cards for pt in c.picker.ports()}
+        free = [pt for pt in range(1, p.NUM_CHANNELS + 1) if pt not in used]
+        named = [f"{pt} ({self.labels[pt]})" if self.labels.get(pt) else str(pt) for pt in free]
+        self.free.setText(f"<small>Ports in no group stay dark: {', '.join(named)}</small>" if free else "")
+        self.free_btn.setVisible(bool(free) and len(self.cards) < (p.BOOT_CANVAS_MAX if self.boot else p.LOOP_CANVAS_MAX))
+        self.add_btn.setEnabled(len(self.cards) < (p.BOOT_CANVAS_MAX if self.boot else p.LOOP_CANVAS_MAX))
 
-    def value(self) -> tuple[CanvasLayout, list[CanvasParams], int]:
-        chans, params = [], []
-        for card in self.cards:
-            ports, prm = card.value()
-            if ports:
-                chans.append([p.PORT_TO_CH[pt - 1] for pt in ports])
-                params.append(prm)
-        return CanvasLayout(chans), params, self.fps.currentData()
+    def _group_free(self) -> None:
+        used = {pt for c in self.cards for pt in c.picker.ports()}
+        named = [pt for pt in range(1, p.NUM_CHANNELS + 1) if pt not in used and self.labels.get(pt)]
+        free = named or [pt for pt in range(1, p.NUM_CHANNELS + 1) if pt not in used]
+        self.add(GroupState(free, CanvasParams(vmap_process=1)))
+
+    def value(self) -> tuple[list[GroupState], int]:
+        return [c.value() for c in self.cards if c.picker.ports()], self.fps.currentData()
 
 
 class CanvasPage(QWidget):
@@ -145,31 +276,59 @@ class CanvasPage(QWidget):
         super().__init__()
         self.device = device
         self.labels: dict[int, str] = {}
+        self.state: EffectsState | None = None        # what the controller has (last read / written)
         outer = QVBoxLayout(self)
-        outer.addWidget(QLabel(
-            "The controller's own effects. Each <b>canvas</b> is a group of ports running one effect; a port can be in "
-            "one canvas. <b>Loop canvases</b> run normally; <b>boot canvases</b> play once at power-on. Applying stores "
-            "them on the controller and switches it to built-in effects."))
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        inner = QWidget()
-        self.inner_lay = QVBoxLayout(inner)
-        self.loop = CanvasSection("Loop canvases", False, self.labels)
-        self.boot = CanvasSection("Boot canvases", True, self.labels)
-        self.inner_lay.addWidget(self.loop)
-        self.inner_lay.addWidget(self.boot)
-        self.inner_lay.addStretch(1)
-        scroll.setWidget(inner)
-        outer.addWidget(scroll)
-        row = QHBoxLayout()
-        for text, slot in (("Reload", self.refresh), ("Apply to controller", self._apply),
-                           ("Preview boot canvases", lambda: self.device.run(lambda d: d.play_boot_canvas()))):
-            b = QPushButton(text)
-            b.clicked.connect(slot)
-            row.addWidget(b)
-        row.addStretch(1)
-        outer.addLayout(row)
+        intro = QLabel(
+            "Effects that run <b>on the controller itself</b>. Put ports into <b>groups</b> and give each group an "
+            "effect. Changes show on your fans right away and stay on the controller, even with the PC off.")
+        intro.setWordWrap(True)
+        outer.addWidget(intro)
+
+        self.banner = QFrame()
+        self.banner.setStyleSheet("QFrame#banner { background: palette(alternate-base); border-radius: 6px; }")
+        self.banner.setObjectName("banner")
+        bl = QHBoxLayout(self.banner)
+        self.banner_text = QLabel()
+        self.banner_text.setWordWrap(True)
+        use = QPushButton("Use built-in effects")
+        use.clicked.connect(self._activate)
+        bl.addWidget(self.banner_text, 1)
+        bl.addWidget(use)
+        outer.addWidget(self.banner)
+        self.banner.hide()
+
+        self.tabs = QTabWidget()
+        self.loop = GroupList(False, self.labels)
+        self.boot = GroupList(True, self.labels)
+        self.tabs.addTab(self._scroll(self.loop), "Normal lighting")
+        boot_tab = QWidget()
+        btl = QVBoxLayout(boot_tab)
+        self.startup = QCheckBox("Play a startup animation when the PC turns on (once, then normal lighting)")
+        play = QPushButton("▶ Play it now")
+        play.clicked.connect(lambda: self.device.run(lambda d: d.play_boot_canvas()))
+        btl.addWidget(hbox(self.startup, play))
+        btl.addWidget(self._scroll(self.boot), 1)
+        self.tabs.addTab(boot_tab, "Startup animation")
+        outer.addWidget(self.tabs, 1)
+        self.status = QLabel()
+        outer.addWidget(hbox(self.status))
+
+        self._apply_timer = QTimer(self)
+        self._apply_timer.setSingleShot(True)
+        self._apply_timer.setInterval(600)
+        self._apply_timer.timeout.connect(self._apply)
+        self.loop.changed.connect(self._schedule)
+        self.boot.changed.connect(self._schedule)
+        self.startup.toggled.connect(self._startup_toggled)
         self._loaded = False
+
+    @staticmethod
+    def _scroll(w: QWidget) -> QScrollArea:
+        s = QScrollArea()
+        s.setWidgetResizable(True)
+        s.setFrameShape(QFrame.NoFrame)
+        s.setWidget(w)
+        return s
 
     def set_labels(self, labels: dict[int, str]) -> None:
         self.labels.clear()
@@ -180,25 +339,109 @@ class CanvasPage(QWidget):
             self.refresh()
         super().showEvent(e)
 
+    # --- read ---------------------------------------------------------------------------------
+
     def refresh(self) -> None:
         def load(d):
-            return d.canvases(False), d.frame_ms(False), d.canvases(True), d.frame_ms(True)
-        def show(r):
-            (ll, lp), lms, (bl, bp), bms = r
-            self.loop.set(ll, lp, lms)
-            self.boot.set(bl, bp, bms)
-            self._loaded = True
-        self.device.run(load, show)
+            fd, d1, d2 = d.frame_delay(), d.dynamic(1), d.dynamic(2)
+            def groups(boot):
+                layout, params = d.canvases(boot)
+                base = p.BOOT_CANVAS_BASE if boot else 0
+                return [GroupState([p.CH_TO_PORT[ch] for ch in chans], prm, fd[base + i] or 33, d1[base + i], d2[base + i])
+                        for i, (chans, prm) in enumerate(zip(layout.canvases, params))]
+            intro, steady = d.boot_playlist()
+            mode = d.mode()
+            boot = groups(True)
+            return EffectsState(groups(False), boot, d.frame_ms(False), d.frame_ms(True),
+                                intro == BootIntro.START_CANVAS and bool(boot),   # "on" = something will play
+                                steady == BootSteady.HW_EFFECTS and mode != Mode.FSEQ,
+                                {"frame_delay": fd, "dynamic_1": d1, "dynamic_2": d2})
+        self.device.run(load, self._show)
 
-    def _apply(self) -> None:
-        loop, boot = self.loop.value(), self.boot.value()
+    def _show(self, st: EffectsState) -> None:
+        self.state = st
+        self.loop.set(st.loop, st.loop_ms)
+        self.boot.set(st.boot, st.boot_ms)
+        self.startup.blockSignals(True)
+        self.startup.setChecked(st.startup_on)
+        self.startup.blockSignals(False)
+        self.boot.setEnabled(st.startup_on)
+        self.banner_text.setText(
+            "Your controller is showing a <b>saved animation</b> from the Effects studio, so these effects aren't "
+            "active. Changes here are kept, and take over when you switch.")
+        self.banner.setVisible(not st.builtin_active)
+        self.status.setText("")
+        self._loaded = True
+
+    # --- write --------------------------------------------------------------------------------
+
+    def _schedule(self) -> None:
+        if self._loaded:
+            self.status.setText("Saving…")
+            self._apply_timer.start()
+
+    def _startup_toggled(self, on: bool) -> None:
+        self.boot.setEnabled(on)
+        if on and not self.boot.cards:
+            self.boot.add(GroupState([pt for pt in range(1, p.NUM_CHANNELS + 1) if self.labels.get(pt)] or
+                                     list(range(1, p.NUM_CHANNELS + 1)), CanvasParams(effect=0, vmap_process=1)),
+                          emit=False)
+        self._schedule()
+
+    def _wanted(self) -> EffectsState:
+        (loop, loop_ms), (boot, boot_ms) = self.loop.value(), self.boot.value()
+        cur = self.state
+        return EffectsState(loop, boot, loop_ms, boot_ms, self.startup.isChecked(), cur.builtin_active, cur.arrays)
+
+    def _apply(self, activate: bool = False) -> None:
+        if self.state is None:
+            return
+        want, have = self._wanted(), self.state
+
         def write(d):
-            d.set_mode(Mode.HARDWARE)        # stops a stored animation instantly (no dark pause)
-            d.set_canvases(loop[0], loop[1], boot=False)
-            d.set_frame_ms(loop[2], boot=False)
-            d.set_canvases(boot[0], boot[1], boot=True)
-            d.set_frame_ms(boot[2], boot=True)
-            d.set_boot_playlist(p.BootIntro.START_CANVAS, p.BootSteady.HW_EFFECTS)
-            d.set_mode(Mode.HARDWARE)
-        self.device.run(write, lambda _: self.device.status.emit(
-            "Built-in effects stored; the controller runs them at power-on"), lambda e: error(self, "Apply", e))
+            for boot, wg, hg in ((False, want.loop, have.loop), (True, want.boot, have.boot)):
+                base = p.BOOT_CANVAS_BASE if boot else 0
+                wl = [[p.PORT_TO_CH[pt - 1] for pt in g.ports] for g in wg]
+                hl = [[p.PORT_TO_CH[pt - 1] for pt in g.ports] for g in hg]
+                if wl != hl:                       # groups or their ports changed: rewrite this whole set
+                    d.set_canvases(CanvasLayout(wl), [g.params for g in wg], boot=boot)
+                else:                              # only settings changed: just those groups
+                    for i, (a, b) in enumerate(zip(wg, hg)):
+                        if a.params != b.params:
+                            d.set_canvas_params(base + i, replace(a.params, ch_count=len(a.ports)))
+            if want.loop_ms != have.loop_ms:
+                d.set_frame_ms(want.loop_ms, boot=False)
+            if want.boot_ms != have.boot_ms:
+                d.set_frame_ms(want.boot_ms, boot=True)
+            arrays = {k: list(v) for k, v in have.arrays.items()}
+            for boot, groups in ((False, want.loop), (True, want.boot)):
+                base = p.BOOT_CANVAS_BASE if boot else 0
+                for i, g in enumerate(groups):
+                    arrays["frame_delay"][base + i] = g.frame_delay
+                    arrays["dynamic_1"][base + i] = g.palette
+                    arrays["dynamic_2"][base + i] = g.blend
+            if arrays["frame_delay"] != list(have.arrays["frame_delay"]):
+                d.set_frame_delay(arrays["frame_delay"])
+            if arrays["dynamic_1"] != list(have.arrays["dynamic_1"]):
+                d.set_dynamic(1, arrays["dynamic_1"])
+            if arrays["dynamic_2"] != list(have.arrays["dynamic_2"]):
+                d.set_dynamic(2, arrays["dynamic_2"])
+            intro = BootIntro.START_CANVAS if want.startup_on and want.boot else BootIntro.NONE
+            active = want.builtin_active or activate
+            current_steady = d.boot_playlist()[1]
+            steady = BootSteady.HW_EFFECTS if active else current_steady
+            if (intro, steady) != tuple(d.boot_playlist()):
+                d.set_boot_playlist(intro, steady)
+            if active:
+                d.set_mode(Mode.HARDWARE)          # also stops a stored animation instantly
+            return replace(want, builtin_active=active, arrays=arrays)
+
+        def done(new_state: EffectsState) -> None:
+            self.state = new_state
+            self.banner.setVisible(not new_state.builtin_active)
+            self.status.setText("✓ Saved on the controller")
+
+        self.device.run(write, done, lambda e: (self.status.setText(""), error(self, "Built-in effects", e)))
+
+    def _activate(self) -> None:
+        self._apply(activate=True)
