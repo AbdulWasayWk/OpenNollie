@@ -236,6 +236,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-11: Identify crashed the GUI (segfault): a parentless QTimer owned by a garbage-collected Python object.
+  Qt objects that outlive a function call need a Qt parent. (source: offscreen repro with faulthandler)
 - 2026-10-11: **Mode SL = LEDs paused (dark) while the flash is busy.** Triggered by the STOP command (`F3 03`) and by
   any flash access (CRC, writes; erase didn't seem to on its own). It lasts until ~1.2 s after the last flash op, ignores
   live frames and PLAY, and can't be cut short; afterwards the device returns to its stored lighting. **`FA 01 01`
@@ -291,6 +293,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Decision log
 <!-- Newest first. Format: YYYY-MM-DD: decision; reason -->
+- 2026-10-11: "Save to device" **writes immediately** (user's choice) and accepts the ~2 s firmware LED pause for new
+  animations. Rejected: deferring the flash write to shutdown/logout while the daemon plays the effect live.
+- 2026-10-11: Studio autosaves the edited profile (`~/.local/state/opennollie/studio.toml`) and reopens it on start
+  (user: app forgot the last settings).
 - 2026-10-11: The firmware's built-in effects are **not** profile effects any more (`hw:` removed from profiles, studio,
   tray). They couldn't be previewed or fully edited there (user request). They stay on the Built-in effects page
   (canvases). Static-only profiles are still stored as Solid canvases.
