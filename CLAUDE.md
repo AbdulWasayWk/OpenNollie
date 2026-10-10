@@ -94,16 +94,18 @@ report (data starts at byte 0). All multi-byte values are **little-endian**.
 
 | App page | Features | Status |
 |---|---|---|
-| Home / Basic settings | controller name; fw version; boot playlist (Start effect: start canvas; Loop effect: HW effects / FSEQ loop / FSEQ once); direct-drive idle timeout; (GPIO: not on 16CH) | [ ] |
-| Loop canvas / Boot canvas | add/delete/edit canvases, drag channels into canvases, per-canvas effect + params (brightness, speed, size, delay, frame delay, vmap process, palette, blend, colors 1–3), loop FPS, start FPS | [ ] |
-| LED settings | per-channel LED count, component presets (`Components/*.json`, `vmap/*.json`), LED order (first/reverse) = vmap, vmap name (auto-detect: N/A on 16CH) | [ ] |
-| Palette editor | 8 groups × 16 colors; import/export JSON | [ ] |
-| FSEQ player | upload FSEQ to flash (erase/write/verify), channel map, play/stop/loop | [ ] |
-| Device info | canvas overview, power (rails V/I), MCU temp/load, flash chip ID, ROM state, write count, stored FSEQ size | [ ] |
-| Backup | export/import config JSON, factory reset, restart | [ ] |
-| Power test | N/A on 16CH (Nollie8 Plus only) | — |
-| Identify | light one channel red (`make_ch`) | [ ] |
-| **OpenNollie extras** | live per-channel colors; **software effects engine** (any user-defined effect) streamed live, or **rendered to FSEQ and stored on the device** | [ ] |
+| Home / Basic settings | controller name; fw version; boot playlist; direct-drive idle timeout; (GPIO: not on 16CH) | [x] GUI Device page + CLI |
+| Loop canvas / Boot canvas | canvases, ports per canvas, per-canvas effect + params, loop/start FPS | [x] loop canvases verified on hw; [ ] boot canvases (14+) not yet hw-tested |
+| LED settings | LED count per port, names | [x] |
+| LED settings | LED order remap (vmap: reverse/first), component presets (`Components/*.json`, `vmap/*.json`) | [ ] protocol done (`set_led_index`), no UI |
+| LED settings | auto-detect LED count | N/A on 16CH (fw lacks it); our `ledtest` replaces it |
+| Palette editor | 8 groups × 16 colors; import/export JSON | [x] (palette write verified; GUI not user-tested) |
+| FSEQ player | upload FSEQ (erase/write/verify), channel map, play/stop/loop | [x] verified on hw |
+| Device info | power (V/I/temp/load), flash chip, write count, stored FSEQ size | [x] |
+| Backup | export config JSON, factory reset, restart | [x] export, restart verified; [ ] **restore from JSON**; factory reset not run from our app |
+| Power test | | N/A on 16CH |
+| Identify | light one port | [x] |
+| **OpenNollie extras** | live per-port colors; software effects engine (10 effects + custom keyframes), live or stored as FSEQ; profiles; daemon; GUI studio with case preview | [x] verified on hw (GUI pending user test) |
 
 ## Architecture (decided)
 
@@ -184,7 +186,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
       identify, LED test dialog), Palettes (+ import/export), Stored animation (status, play/stop, FSEQ upload),
       Device (name, power, startup playlist, idle fallback, backup JSON, restart, factory reset)
 - [x] Offscreen screenshot check of every page; every effect exercised in the editor without errors
-- [ ] User test on the real desktop (Breeze style); restore-from-backup; tray icon?
+- [ ] User test on the real desktop (Breeze style)
+- [ ] Restore from backup JSON; LED-order (vmap) editor + component presets; tray icon / quick profile switch
 
 ### Phase 6: Packaging
 - [ ] PKGBUILD, udev rule, systemd unit, README
