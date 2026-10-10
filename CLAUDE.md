@@ -73,9 +73,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] `git init`
 
 ### Phase 1: Baseline live control
-- [ ] Read OpenRGB's Nollie controller source → summarize in `docs/PROTOCOL.md`
-- [ ] Python script: set a solid color per channel
-- [ ] Python script: set the per-channel LED count
+- [x] Read OpenRGB's Nollie controller source → `docs/PROTOCOL.md`
+- [x] `opennollie/protocol.py` (packet builders) + `device.py` (hidapi) + `cli.py` (`set`, `off`, `identify`)
+      with unit tests (`python3 -m unittest discover tests`)
+- [x] LED count per channel: N/A as a separate command; on the 16CH the count is part of every packet
+- [x] Verified on wire (capture) and on hardware: all fans + GPU showed dim blue, so GRB order is correct
+- [ ] Map OpenRGB port numbers to board labels (`python3 -m opennollie identify`)
+- [x] Device holds the last frame after the host stops sending (several minutes observed); no keep-alive needed
 
 ### Phase 2: Capture sessions (Windows app in the VM, sniffed on the host)
 One action per capture, about 3 s between steps:
@@ -109,14 +113,22 @@ One action per capture, about 3 s between steps:
 - [ ] PKGBUILD, udev rule, systemd unit, README
 
 ## Open questions
-- What's connected to each channel (device type and LED count)? *(waiting on the user)*
+- What's connected to each port (device type and LED count)? Known so far: **port 9 = GPU** (GPU's ARGB in
+  "external" sync mode via OpenRGB). The rest are fans; mapping pending `identify`.
 - Windows app name and version? Is it .NET or Electron, i.e. can it be decompiled?
 - Which effects can the firmware store? Can it store custom or keyframe animations, or only
   built-in ones?
-- Does the device need a periodic keep-alive in software mode, or does it hold the last frame?
+- Do OpenRGB's port numbers (Channel 1..16) match the labels printed on the board?
 
 ## Findings log
 <!-- Newest first. Format: YYYY-MM-DD: finding (source: capture/file/test) -->
+- 2026-10-10: Hardware test passed: `set all blue --brightness 30` turned all fans and the GPU dim blue, and the colors
+  stayed after the program exited, so the device holds the last frame. GPU is on port 9 (OpenRGB "Channel 9"), with
+  the GPU's own ARGB set to external sync. (source: user observation)
+- 2026-10-10: Live protocol (from OpenRGB): one 1024 B packet per port `[wire_ch, flag, cnt_hi, cnt_lo, GRB...]`,
+  wire channels 16..31, ascending, ch 31 always last with flag 2 (latch?). Our encoder matches on the wire.
+  The device sends no IN reports during live updates. (source: OpenRGB b190d3e, captures/p1_set_all_blue.pcapng)
+- 2026-10-10: OpenRGB config has the Nollie with all 16 zones at 0 LEDs, so no LED counts are known yet. (source: ~/.config/OpenRGB)
 - 2026-10-10: Host usbmon capture verified: every Nollie URB on bus 1 is recorded. (source: capture self-test)
 - 2026-10-10: HID descriptor gives 1024 B output / 64 B input reports, vendor page 0xFF00, no report IDs.
   (source: sysfs report_descriptor)
