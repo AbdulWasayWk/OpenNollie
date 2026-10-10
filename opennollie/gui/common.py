@@ -87,20 +87,26 @@ class ColorButton(QPushButton):
         super().__init__(parent)
         self.setFixedSize(34, 26)
         self.setCursor(Qt.PointingHandCursor)
+        self.setObjectName("colorSwatch")
         self.clicked.connect(self._pick)
         self.set_color(color)
 
     def set_color(self, color: RGB) -> None:
         self._color = tuple(int(x) for x in color)
         border = "#888" if sum(self._color) > 600 else "#555"
-        self.setStyleSheet(f"background:{hexcolor(self._color)}; border:1px solid {border}; border-radius:4px;")
+        # Scoped to this button by ID: a bare declaration would cascade into child widgets, including the
+        # color dialog, painting all its fields in the swatch color.
+        self.setStyleSheet(
+            f"QPushButton#colorSwatch {{ background: {hexcolor(self._color)}; border: 1px solid {border};"
+            f" border-radius: 4px; }}"
+            f"QPushButton#colorSwatch:hover {{ border: 2px solid palette(highlight); }}")
         self.setToolTip(hexcolor(self._color))
 
     def color(self) -> RGB:
         return self._color
 
     def _pick(self) -> None:
-        c = QColorDialog.getColor(QColor(*self._color), self, "Pick a color")
+        c = QColorDialog.getColor(QColor(*self._color), self.window(), "Pick a color")
         if c.isValid():
             self.set_color((c.red(), c.green(), c.blue()))
             self.changed.emit(self._color)
